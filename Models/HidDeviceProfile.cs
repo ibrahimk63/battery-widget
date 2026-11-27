@@ -9,7 +9,10 @@ public sealed class HidDeviceProfile
     public string? UsagePageHex { get; set; }
     public string? QueryPacketHex { get; set; }
     public bool UseFeatureReport { get; set; }
+    public bool ReadPassiveInput { get; set; }
+    public int ExpectedReportId { get; set; } = -1;
     public int BatteryByteIndex { get; set; } = 1;
+    public int BatteryMask { get; set; } = 0xFF;
     public int? ChargingByteIndex { get; set; }
     public int ChargingMask { get; set; } = 0x01;
     public int MaxBatteryValue { get; set; } = 100;

@@ -55,10 +55,6 @@ public sealed class UniversalCompxProvider : IBatteryProvider
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                // Skip ATK N9 headset PID 0x11CB (handled by HeadsetVendorsProvider)
-                if (device.VendorID == 0x373B && device.ProductID == 0x11CB)
-                    continue;
-
                 var target = _cache.GetOrAdd(device.DevicePath, _ => InspectTarget(device));
                 if (target is null)
                     continue;

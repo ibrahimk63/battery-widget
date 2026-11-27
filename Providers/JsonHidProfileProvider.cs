@@ -7,43 +7,59 @@ using HidSharp;
 namespace BatteryWidget.Providers;
 
 /// <summary>
-/// Loads user-defined USB/2.4GHz HID device profiles from the profiles/*.json folder.
+/// Loads user-defined and Auto-Learned USB/2.4GHz HID device profiles from both
+/// app-local profiles/*.json and persistent %AppData%\BatteryWidget\profiles/*.json.
 /// </summary>
 public sealed class JsonHidProfileProvider : IBatteryProvider
 {
-    private readonly string _profilesDirectory;
+    private readonly string[] _profilesDirectories;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
         Converters = { new JsonStringEnumConverter() }
     };
 
+    public static string UserProfilesDirectory => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "BatteryWidget",
+        "profiles");
+
     public string ProviderName => "JSON HID Profilleri";
 
     public JsonHidProfileProvider(string? profilesDirectory = null)
     {
-        _profilesDirectory = profilesDirectory
-            ?? Path.Combine(AppContext.BaseDirectory, "profiles");
+        _profilesDirectories = profilesDirectory is not null
+            ? [profilesDirectory]
+            : [Path.Combine(AppContext.BaseDirectory, "profiles"), UserProfilesDirectory];
     }
 
     public IReadOnlyList<HidDeviceProfile> LoadProfiles()
     {
         var list = new List<HidDeviceProfile>();
-        if (!Directory.Exists(_profilesDirectory))
-            return list;
+        var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var file in Directory.EnumerateFiles(_profilesDirectory, "*.json"))
+        foreach (var dir in _profilesDirectories)
         {
-            try
+            if (!Directory.Exists(dir))
+                continue;
+
+            foreach (var file in Directory.EnumerateFiles(dir, "*.json"))
             {
-                var json = File.ReadAllText(file);
-                var profile = JsonSerializer.Deserialize<HidDeviceProfile>(json, JsonOptions);
-                if (profile is not null && !string.IsNullOrWhiteSpace(profile.Name))
-                    list.Add(profile);
-            }
-            catch
-            {
-                // Skip invalid profile files
+                try
+                {
+                    var json = File.ReadAllText(file);
+                    var profile = JsonSerializer.Deserialize<HidDeviceProfile>(json, JsonOptions);
+                    if (profile is null || string.IsNullOrWhiteSpace(profile.Name))
+                        continue;
+
+                    string key = $"{profile.VendorIdHex}:{string.Join(",", profile.ProductIdsHex)}:{profile.Name}";
+                    if (seenKeys.Add(key))
+                        list.Add(profile);
+                }
+                catch
+                {
+                    // Skip invalid profile files
+                }
             }
         }
         return list;
@@ -92,50 +108,47 @@ public sealed class JsonHidProfileProvider : IBatteryProvider
 
                 using (stream)
                 {
-                    stream.ReadTimeout = 500;
-                    stream.WriteTimeout = 500;
+                    stream.ReadTimeout = 350;
+                    stream.WriteTimeout = 350;
 
-                    byte[]? response = null;
                     if (profile.UseFeatureReport && device.GetMaxFeatureReportLength() > 0)
                     {
                         var buf = new byte[device.GetMaxFeatureReportLength()];
                         if (query is not null)
                         {
                             Array.Copy(query, buf, Math.Min(query.Length, buf.Length));
-                            stream.SetFeature(buf);
+                            try { stream.SetFeature(buf); } catch { /* some devices only support GetFeature */ }
                         }
+                        else if (profile.ExpectedReportId >= 0)
+                        {
+                            buf[0] = (byte)profile.ExpectedReportId;
+                        }
+
                         stream.GetFeature(buf);
-                        response = buf;
+                        var parsed = ParseWithProfile(profile, buf);
+                        if (parsed.HasValue)
+                            return BuildInfo(profile, vid, device.ProductID, parsed.Value);
                     }
                     else if (device.GetMaxInputReportLength() > 0)
                     {
-                        if (query is not null && device.GetMaxOutputReportLength() > 0)
+                        if (!profile.ReadPassiveInput && query is not null && device.GetMaxOutputReportLength() > 0)
                         {
                             var outBuf = new byte[device.GetMaxOutputReportLength()];
                             Array.Copy(query, outBuf, Math.Min(query.Length, outBuf.Length));
                             stream.Write(outBuf, 0, outBuf.Length);
                         }
-                        var inBuf = new byte[device.GetMaxInputReportLength()];
-                        int read = stream.Read(inBuf, 0, inBuf.Length);
-                        if (read > 0)
-                            response = inBuf[..read];
-                    }
 
-                    if (response is not null)
-                    {
-                        var parsed = ParseWithProfile(profile, response);
-                        if (parsed.HasValue)
+                        var inBuf = new byte[device.GetMaxInputReportLength()];
+                        int attempts = profile.ReadPassiveInput ? 3 : 2;
+                        for (int i = 0; i < attempts; i++)
                         {
-                            return new DeviceBatteryInfo
-                            {
-                                Id = $"profile-{vid:X4}-{device.ProductID:X4}",
-                                Name = profile.Name,
-                                Category = profile.Category,
-                                Connection = ConnectionKind.Wireless24Ghz,
-                                BatteryPercent = parsed.Value.Percent,
-                                IsCharging = parsed.Value.IsCharging,
-                                IsConnected = true
-                            };
+                            int read = stream.Read(inBuf, 0, inBuf.Length);
+                            if (read <= 0)
+                                break;
+
+                            var parsed = ParseWithProfile(profile, inBuf.AsSpan(0, read));
+                            if (parsed.HasValue)
+                                return BuildInfo(profile, vid, device.ProductID, parsed.Value);
                         }
                     }
                 }
@@ -149,12 +162,30 @@ public sealed class JsonHidProfileProvider : IBatteryProvider
         return null;
     }
 
+    private static DeviceBatteryInfo BuildInfo(HidDeviceProfile profile, int vid, int pid, (int Percent, bool IsCharging) parsed)
+    {
+        return new DeviceBatteryInfo
+        {
+            Id = $"profile-{vid:X4}-{pid:X4}",
+            Name = profile.Name,
+            Category = profile.Category,
+            Connection = ConnectionKind.Wireless24Ghz,
+            BatteryPercent = parsed.Percent,
+            IsCharging = parsed.IsCharging,
+            IsConnected = true
+        };
+    }
+
     public static (int Percent, bool IsCharging)? ParseWithProfile(HidDeviceProfile profile, ReadOnlySpan<byte> data)
     {
+        if (profile.ExpectedReportId >= 0 && (data.Length == 0 || data[0] != profile.ExpectedReportId))
+            return null;
+
         if (profile.BatteryByteIndex < 0 || profile.BatteryByteIndex >= data.Length)
             return null;
 
-        int raw = data[profile.BatteryByteIndex];
+        int mask = profile.BatteryMask <= 0 ? 0xFF : profile.BatteryMask;
+        int raw = data[profile.BatteryByteIndex] & mask;
         int max = Math.Max(1, profile.MaxBatteryValue);
         int percent = Math.Clamp((int)Math.Round(raw * 100.0 / max), 0, 100);
 

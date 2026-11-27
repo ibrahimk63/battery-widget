@@ -35,6 +35,7 @@ public partial class App : System.Windows.Application
             new HyperXCloud3Provider(),
             new DarmosharkM3V2Provider(),
             new UniversalCompxProvider(),
+            new UniversalHidFingerprintProvider(),
             new LogitechHidppProvider(),
             new RazerBatteryProvider(),
             new HeadsetVendorsProvider(),

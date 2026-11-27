@@ -328,4 +328,67 @@ public class ProviderAndServiceTests
         Assert.Equal(60, resA7.Value.Percent);
         Assert.False(resA7.Value.IsCharging);
     }
+
+    [Fact]
+    public void FingerprintEngine_ParseRapoo8KReport_ParsesDischargingAndCharging()
+    {
+        var pkt = new byte[19];
+        pkt[0] = 0x07;
+        pkt[7] = 1; // discharging
+        pkt[8] = 73;
+        var res1 = UniversalHidFingerprintProvider.ParseRapoo8KReport(pkt);
+        Assert.NotNull(res1);
+        Assert.Equal(73, res1.Value.Percent);
+        Assert.False(res1.Value.IsCharging);
+
+        pkt[7] = 2; // charging
+        pkt[8] = 95;
+        var res2 = UniversalHidFingerprintProvider.ParseRapoo8KReport(pkt);
+        Assert.NotNull(res2);
+        Assert.Equal(95, res2.Value.Percent);
+        Assert.True(res2.Value.IsCharging);
+    }
+
+    [Fact]
+    public void AutoLearn_FindAndRefineCandidates_NarrowsDownExactBatteryByte()
+    {
+        byte[] packetAt74 = [0x08, 0x04, 74, 0x10, 74, 0x00];
+        byte[] packetAt73 = [0x08, 0x04, 74, 0x10, 73, 0x00];
+
+        var first = AutoLearnService.FindMatchingByteCandidates(
+            0x24AE, 0x1417, "8K Mouse", false, true, 0x08, null, packetAt74, 74);
+        Assert.Equal(2, first.Count); // indices 2 and 4 both matched 74
+
+        var second = AutoLearnService.FindMatchingByteCandidates(
+            0x24AE, 0x1417, "8K Mouse", false, true, 0x08, null, packetAt73, 73);
+        var refined = AutoLearnService.RefineCandidates(first, second);
+
+        Assert.Single(refined);
+        Assert.Equal(4, refined[0].BatteryByteIndex);
+    }
+
+    [Fact]
+    public void JsonHidProfile_ParseWithProfile_AppliesMaskAndExpectedReportId()
+    {
+        var profile = new HidDeviceProfile
+        {
+            Name = "Learned Mouse",
+            ExpectedReportId = 0xB6,
+            BatteryByteIndex = 20,
+            BatteryMask = 0x7F,
+            MaxBatteryValue = 100
+        };
+
+        var wrongReport = new byte[24];
+        wrongReport[0] = 0x05;
+        wrongReport[20] = 0x80 | 64;
+        Assert.Null(JsonHidProfileProvider.ParseWithProfile(profile, wrongReport));
+
+        var rightReport = new byte[24];
+        rightReport[0] = 0xB6;
+        rightReport[20] = 0x80 | 64;
+        var parsed = JsonHidProfileProvider.ParseWithProfile(profile, rightReport);
+        Assert.NotNull(parsed);
+        Assert.Equal(64, parsed.Value.Percent);
+    }
 }

@@ -1,5 +1,6 @@
 using System.Windows;
 using BatteryWidget.Models;
+using BatteryWidget.Providers;
 using BatteryWidget.Services;
 
 namespace BatteryWidget.UI;
@@ -11,6 +12,7 @@ public partial class SettingsWindow : Window
     private readonly AppSettings _settings;
     private readonly BatteryMonitorService _monitorService;
     private readonly Action _onSaved;
+    private IReadOnlyList<LearnedCandidate> _currentCandidates = [];
 
     public SettingsWindow(AppSettings settings, BatteryMonitorService monitorService, Action onSaved)
     {
@@ -27,6 +29,7 @@ public partial class SettingsWindow : Window
         OpacitySlider.Value = _settings.Opacity;
 
         UpdateLabels();
+        LoadLearnableDevices();
         _ = RunUniversalDiagnosticsAsync(pollFirst: false);
     }
 
@@ -96,6 +99,98 @@ public partial class SettingsWindow : Window
     private void CopyHid_Click(object sender, RoutedEventArgs e)
     {
         System.Windows.Clipboard.SetText(HidReportBox.Text);
+    }
+
+    private void LoadLearnableDevices()
+    {
+        var items = AutoLearnService.ListLearnableDevices();
+        LearnDeviceCombo.ItemsSource = items;
+        if (items.Count > 0)
+            LearnDeviceCombo.SelectedIndex = 0;
+    }
+
+    private void RefreshLearnDevices_Click(object sender, RoutedEventArgs e)
+    {
+        LoadLearnableDevices();
+        LearnStatusText.Text = "Cihaz listesi yenilendi.";
+    }
+
+    private async void FindCandidates_Click(object sender, RoutedEventArgs e)
+    {
+        await RunAutoLearnScanAsync(refine: false);
+    }
+
+    private async void RefineCandidates_Click(object sender, RoutedEventArgs e)
+    {
+        await RunAutoLearnScanAsync(refine: true);
+    }
+
+    private async Task RunAutoLearnScanAsync(bool refine)
+    {
+        if (LearnDeviceCombo.SelectedItem is not LearnableDeviceItem selected)
+        {
+            LearnStatusText.Text = "Lütfen önce listeden bir cihaz seçin.";
+            return;
+        }
+
+        if (!int.TryParse(KnownPercentBox.Text.Trim(), out int knownPct) || knownPct < 1 || knownPct > 100)
+        {
+            LearnStatusText.Text = "Lütfen 1 ile 100 arasında geçerli bir pil yüzdesi girin.";
+            return;
+        }
+
+        FindCandidatesBtn.IsEnabled = false;
+        RefineCandidatesBtn.IsEnabled = false;
+        SaveLearnedBtn.IsEnabled = false;
+        LearnStatusText.Text = $"{selected.DisplayName} taranıyor...";
+
+        try
+        {
+            var found = await AutoLearnService.ScanDeviceForBatteryAsync(
+                selected.VendorId, selected.ProductId, selected.DisplayName, knownPct);
+
+            if (refine && _currentCandidates.Count > 0)
+                _currentCandidates = AutoLearnService.RefineCandidates(_currentCandidates, found);
+            else
+                _currentCandidates = found;
+
+            CandidatesListBox.ItemsSource = _currentCandidates;
+            if (_currentCandidates.Count > 0)
+            {
+                CandidatesListBox.SelectedIndex = 0;
+                SaveLearnedBtn.IsEnabled = true;
+                RefineCandidatesBtn.IsEnabled = true;
+                LearnStatusText.Text = _currentCandidates.Count == 1
+                    ? "Tek kesin aday bulundu! 'Seçili Adayı Kalıcı Kaydet' ile kaydedebilirsiniz."
+                    : $"{_currentCandidates.Count} aday bulundu. Şarj %1 değişince yeni değeri yazıp '2. Daralt'a basabilir veya doğrudan kaydedebilirsiniz.";
+            }
+            else
+            {
+                LearnStatusText.Text = "Eşleşen aday bulunamadı. Cihazın açık/aktif olduğundan ve pil yüzdesinin doğru olduğundan emin olun.";
+            }
+        }
+        catch (Exception ex)
+        {
+            LearnStatusText.Text = $"Tarama hatası: {ex.Message}";
+        }
+        finally
+        {
+            FindCandidatesBtn.IsEnabled = true;
+        }
+    }
+
+    private void SaveLearned_Click(object sender, RoutedEventArgs e)
+    {
+        if (CandidatesListBox.SelectedItem is not LearnedCandidate candidate)
+        {
+            LearnStatusText.Text = "Lütfen listeden bir aday seçin.";
+            return;
+        }
+
+        var category = BluetoothBatteryProvider.GuessCategory(candidate.DeviceName);
+        string savedPath = AutoLearnService.SaveLearnedProfile(candidate, candidate.DeviceName, category);
+        LearnStatusText.Text = $"Kaydedildi: {savedPath}";
+        _ = _monitorService.PollNowAsync();
     }
 
     private void Save_Click(object sender, RoutedEventArgs e)

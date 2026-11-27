@@ -21,6 +21,8 @@ Bilgisayarınızda .NET kurulu olmasına gerek yoktur; tek dosyayı indirip doğ
 - **Oyun Kolları (Xbox & PlayStation)** — Xbox Kablosuz Dongle / USB / Bluetooth kolları (`XInput` + `Windows.Gaming.Input` — gerçek yüzde veya `Dolu`/`Orta`/`Düşük`/`Boş` kademe gösterimi) ve DualSense / DualShock 4
 - **Standart USB/HID Pil Aygıtları** — Standart HID pil raporu sunan diğer harici kablosuz cihazları otomatik algılar (dizüstü bilgisayarın dahili pilini hariç tutar)
 - **Özel USB / 2.4GHz Profilleri (`profiles/*.json`)** — Kod yazmadan yeni cihazlar eklemek için JSON profil desteği (`profiles/_template.json.example`)
+- **Evrensel HID Parmak İzi Motoru** — Markadan bağımsız olarak Rapoo / 8K fareler (`0x07` 19B Input), Standart HID Input+Feature pil raporları ve ATK/Nordic/CompX cihazlarını descriptor parmak iziyle otomatik tanır
+- **Cihaz Öğret (Auto-Learn Sihirbazı)** — Tanınmayan herhangi bir yeni 2.4GHz/USB cihazın güncel pil yüzdesini girerek batarya baytını otomatik bulur ve `%AppData%\BatteryWidget\profiles\` altında kalıcı profile dönüştürür
 - **Genel Aygıt Tanılama**: Ayarlar → Aygıt Tanılama sekmesinden her bilgisayarın kendi bağlı USB HID, Report ID ve sanal COM portlarını tek tıkla tarama
 
 ## Özellikler
