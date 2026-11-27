@@ -8,37 +8,143 @@ using Windows.Storage.Streams;
 namespace BatteryWidget.Providers;
 
 /// <summary>
-/// Discovers connected Bluetooth devices (both Classic Bluetooth HFP/HID via Windows SetupAPI
-/// DEVPKEY_Bluetooth_Battery and Bluetooth LE devices via GATT Battery Service 0x180F / 0x2A19).
+/// Discovers all currently connected Bluetooth devices (Classic Bluetooth via Windows SetupAPI
+/// DEVPKEY_Bluetooth_Battery and Bluetooth LE via GATT Battery Service 0x180F / 0x2A19).
+/// Filters strictly against active Windows AEP connections keyed by ContainerId so stale
+/// disconnected devices never appear and multiple simultaneous BT devices are all supported.
 /// </summary>
 public sealed class BluetoothBatteryProvider : IBatteryProvider
 {
+    public sealed record ConnectedBtDevice(string ContainerId, string Name, bool IsBle, string DeviceId);
+
     public string ProviderName => "Bluetooth (Classic + BLE)";
 
     public async Task<IReadOnlyList<DeviceBatteryInfo>> PollDevicesAsync(CancellationToken cancellationToken = default)
     {
         var results = new List<DeviceBatteryInfo>();
-        var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var connectedByContainer = await GetConnectedBluetoothAepMapAsync(cancellationToken);
+        if (connectedByContainer.Count == 0)
+            return results;
 
-        // Source 1: Fast Win32 SetupAPI scan for Windows DEVPKEY_Bluetooth_Battery (covers Classic + cached BLE)
-        var pnpDevices = await Task.Run(() => ReadWindowsBluetoothBatteries(cancellationToken), cancellationToken);
+        var resolvedContainers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Source 1: Fast Win32 SetupAPI scan for Windows DEVPKEY_Bluetooth_Battery (Classic + cached BLE)
+        var pnpReadings = await Task.Run(() => ReadRawPnpBluetoothBatteries(cancellationToken), cancellationToken);
+        var connectedNames = connectedByContainer.ToDictionary(
+            kv => kv.Key,
+            kv => kv.Value.Name,
+            StringComparer.OrdinalIgnoreCase);
+
+        var pnpDevices = FilterAndMapConnectedPnpBatteries(pnpReadings, connectedNames);
         foreach (var dev in pnpDevices)
         {
-            var norm = NormalizeBluetoothName(dev.Name);
-            if (seenNames.Add(norm))
-                results.Add(dev);
+            results.Add(dev);
+            if (dev.Id.StartsWith("bt-pnp-", StringComparison.OrdinalIgnoreCase))
+                resolvedContainers.Add(dev.Id["bt-pnp-".Length..]);
         }
 
-        // Source 2: BLE GATT Battery Service fallback for BLE devices without DEVPKEY_Bluetooth_Battery
-        var bleDevices = await ReadBleGattBatteriesAsync(cancellationToken);
-        foreach (var dev in bleDevices)
+        // Source 2: Parallel BLE GATT Battery Service fallback for connected BLE devices not yet resolved
+        var bleDevices = await ReadBleGattBatteriesAsync(connectedByContainer, resolvedContainers, cancellationToken);
+        results.AddRange(bleDevices);
+
+        return results;
+    }
+
+    public static IReadOnlyList<DeviceBatteryInfo> FilterAndMapConnectedPnpBatteries(
+        IEnumerable<(string ContainerId, byte BatteryPercent, string? FallbackName)> pnpReadings,
+        IReadOnlyDictionary<string, string> connectedContainerNames)
+    {
+        var results = new List<DeviceBatteryInfo>();
+        var seenContainers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (containerId, battery, fallbackName) in pnpReadings)
         {
-            var norm = NormalizeBluetoothName(dev.Name);
-            if (seenNames.Add(norm))
-                results.Add(dev);
+            if (string.IsNullOrWhiteSpace(containerId) || battery > 100)
+                continue;
+
+            // Only include devices that are actually connected right now
+            if (!connectedContainerNames.TryGetValue(containerId, out var aepName))
+                continue;
+
+            if (!seenContainers.Add(containerId))
+                continue;
+
+            string cleanName = NormalizeBluetoothName(aepName);
+            if (string.IsNullOrWhiteSpace(cleanName))
+                cleanName = NormalizeBluetoothName(fallbackName);
+            if (string.IsNullOrWhiteSpace(cleanName))
+                cleanName = "Bluetooth Cihazı";
+
+            results.Add(new DeviceBatteryInfo
+            {
+                Id = $"bt-pnp-{containerId}",
+                Name = cleanName,
+                Category = GuessCategory(cleanName),
+                Connection = ConnectionKind.Bluetooth,
+                BatteryPercent = battery,
+                IsCharging = false,
+                IsConnected = true
+            });
         }
 
         return results;
+    }
+
+    private static async Task<Dictionary<string, ConnectedBtDevice>> GetConnectedBluetoothAepMapAsync(CancellationToken ct)
+    {
+        var map = new Dictionary<string, ConnectedBtDevice>(StringComparer.OrdinalIgnoreCase);
+        string[] extraProps = ["System.Devices.Aep.ContainerId", "System.Devices.Aep.DeviceAddress"];
+
+        try
+        {
+            var classicSelector = BluetoothDevice.GetDeviceSelectorFromConnectionStatus(BluetoothConnectionStatus.Connected);
+            var bleSelector = BluetoothLEDevice.GetDeviceSelectorFromConnectionStatus(BluetoothConnectionStatus.Connected);
+
+            var classicTask = DeviceInformation.FindAllAsync(classicSelector, extraProps).AsTask(ct);
+            var bleTask = DeviceInformation.FindAllAsync(bleSelector, extraProps).AsTask(ct);
+
+            await Task.WhenAll(classicTask, bleTask);
+
+            foreach (var info in classicTask.Result)
+                AddAepEntry(map, info, isBle: false);
+
+            foreach (var info in bleTask.Result)
+                AddAepEntry(map, info, isBle: true);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            // Bluetooth radio may be off or unavailable
+        }
+
+        return map;
+    }
+
+    private static void AddAepEntry(Dictionary<string, ConnectedBtDevice> map, DeviceInformation info, bool isBle)
+    {
+        string? containerId = null;
+        if (info.Properties.TryGetValue("System.Devices.Aep.ContainerId", out var rawCid) && rawCid is Guid guidCid)
+            containerId = guidCid.ToString("N");
+        else if (rawCid is string strCid && Guid.TryParse(strCid, out var parsedCid))
+            containerId = parsedCid.ToString("N");
+
+        if (string.IsNullOrWhiteSpace(containerId))
+            return;
+
+        string cleanName = NormalizeBluetoothName(info.Name);
+        if (!map.TryGetValue(containerId, out var existing))
+        {
+            map[containerId] = new ConnectedBtDevice(containerId, cleanName, isBle, info.Id);
+        }
+        else if (isBle && !existing.IsBle)
+        {
+            // Keep BLE DeviceId if both Classic and BLE AEP exist for same container, preferring non-empty name
+            string bestName = !string.IsNullOrWhiteSpace(cleanName) ? cleanName : existing.Name;
+            map[containerId] = new ConnectedBtDevice(containerId, bestName, true, info.Id);
+        }
     }
 
     public static string NormalizeBluetoothName(string? name)
@@ -56,9 +162,9 @@ public sealed class BluetoothBatteryProvider : IBatteryProvider
         return clean;
     }
 
-    private static List<DeviceBatteryInfo> ReadWindowsBluetoothBatteries(CancellationToken ct)
+    private static List<(string ContainerId, byte BatteryPercent, string? FallbackName)> ReadRawPnpBluetoothBatteries(CancellationToken ct)
     {
-        var list = new List<DeviceBatteryInfo>();
+        var list = new List<(string ContainerId, byte BatteryPercent, string? FallbackName)>();
         IntPtr devInfoSet = SetupDiGetClassDevsW(IntPtr.Zero, null, IntPtr.Zero, DIGCF_PRESENT | DIGCF_ALLCLASSES);
         if (devInfoSet == IntPtr.Zero || devInfoSet == new IntPtr(-1))
             return list;
@@ -78,26 +184,14 @@ public sealed class BluetoothBatteryProvider : IBatteryProvider
                 if (battery > 100)
                     continue;
 
-                string? rawName = TryGetStringProperty(devInfoSet, ref devInfoData, DEVPKEY_Device_FriendlyName)
-                                  ?? TryGetStringProperty(devInfoSet, ref devInfoData, DEVPKEY_Device_DeviceDesc);
+                string? containerId = TryGetGuidProperty(devInfoSet, ref devInfoData, DEVPKEY_Device_ContainerId);
+                if (string.IsNullOrWhiteSpace(containerId))
+                    continue;
 
-                string cleanName = NormalizeBluetoothName(rawName);
-                if (string.IsNullOrWhiteSpace(cleanName))
-                    cleanName = "Bluetooth Cihazı";
+                string? fallbackName = TryGetStringProperty(devInfoSet, ref devInfoData, DEVPKEY_Device_FriendlyName)
+                                       ?? TryGetStringProperty(devInfoSet, ref devInfoData, DEVPKEY_Device_DeviceDesc);
 
-                string containerId = TryGetGuidProperty(devInfoSet, ref devInfoData, DEVPKEY_Device_ContainerId)
-                                     ?? cleanName;
-
-                list.Add(new DeviceBatteryInfo
-                {
-                    Id = $"bt-pnp-{containerId}",
-                    Name = cleanName,
-                    Category = GuessCategory(cleanName),
-                    Connection = ConnectionKind.Bluetooth,
-                    BatteryPercent = battery,
-                    IsCharging = false,
-                    IsConnected = true
-                });
+                list.Add((containerId, battery, fallbackName));
             }
         }
         catch (OperationCanceledException)
@@ -116,80 +210,95 @@ public sealed class BluetoothBatteryProvider : IBatteryProvider
         return list;
     }
 
-    private static async Task<List<DeviceBatteryInfo>> ReadBleGattBatteriesAsync(CancellationToken cancellationToken)
+    private static async Task<List<DeviceBatteryInfo>> ReadBleGattBatteriesAsync(
+        IReadOnlyDictionary<string, ConnectedBtDevice> connectedByContainer,
+        HashSet<string> alreadyFoundContainerIds,
+        CancellationToken cancellationToken)
     {
-        var results = new List<DeviceBatteryInfo>();
+        var targets = connectedByContainer.Values
+            .Where(d => d.IsBle && !alreadyFoundContainerIds.Contains(d.ContainerId))
+            .ToList();
 
+        if (targets.Count == 0)
+            return [];
+
+        var tasks = targets.Select(target => ReadSingleBleDeviceAsync(target, cancellationToken));
+        var results = await Task.WhenAll(tasks);
+
+        return results.Where(r => r is not null).Cast<DeviceBatteryInfo>().ToList();
+    }
+
+    private static async Task<DeviceBatteryInfo?> ReadSingleBleDeviceAsync(ConnectedBtDevice target, CancellationToken ct)
+    {
         try
         {
-            var selector = BluetoothLEDevice.GetDeviceSelectorFromConnectionStatus(BluetoothConnectionStatus.Connected);
-            var devices = await DeviceInformation.FindAllAsync(selector);
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(3000);
 
-            foreach (var devInfo in devices)
+            using var bleDevice = await BluetoothLEDevice.FromIdAsync(target.DeviceId).AsTask(timeoutCts.Token);
+            if (bleDevice is null)
+                return null;
+
+            var percent = await TryReadGattBatteryLevelAsync(bleDevice, BluetoothCacheMode.Cached, timeoutCts.Token)
+                       ?? await TryReadGattBatteryLevelAsync(bleDevice, BluetoothCacheMode.Uncached, timeoutCts.Token);
+
+            if (!percent.HasValue)
+                return null;
+
+            string name = !string.IsNullOrWhiteSpace(target.Name)
+                ? target.Name
+                : NormalizeBluetoothName(bleDevice.Name);
+
+            if (string.IsNullOrWhiteSpace(name))
+                name = "Bluetooth LE Cihazı";
+
+            return new DeviceBatteryInfo
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                try
-                {
-                    using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                    timeoutCts.CancelAfter(1500);
-
-                    using var bleDevice = await BluetoothLEDevice.FromIdAsync(devInfo.Id).AsTask(timeoutCts.Token);
-                    if (bleDevice is null)
-                        continue;
-
-                    var servicesResult = await bleDevice.GetGattServicesForUuidAsync(
-                        GattServiceUuids.Battery, BluetoothCacheMode.Uncached).AsTask(timeoutCts.Token);
-
-                    if (servicesResult.Status != GattCommunicationStatus.Success || servicesResult.Services.Count == 0)
-                        continue;
-
-                    using var batteryService = servicesResult.Services[0];
-                    var charsResult = await batteryService.GetCharacteristicsForUuidAsync(
-                        GattCharacteristicUuids.BatteryLevel, BluetoothCacheMode.Uncached).AsTask(timeoutCts.Token);
-
-                    if (charsResult.Status != GattCommunicationStatus.Success || charsResult.Characteristics.Count == 0)
-                        continue;
-
-                    var readResult = await charsResult.Characteristics[0].ReadValueAsync(BluetoothCacheMode.Uncached).AsTask(timeoutCts.Token);
-                    if (readResult.Status == GattCommunicationStatus.Success && readResult.Value.Length > 0)
-                    {
-                        using var reader = DataReader.FromBuffer(readResult.Value);
-                        int percent = Math.Clamp((int)reader.ReadByte(), 0, 100);
-                        string name = NormalizeBluetoothName(
-                            string.IsNullOrWhiteSpace(bleDevice.Name) ? devInfo.Name : bleDevice.Name);
-
-                        results.Add(new DeviceBatteryInfo
-                        {
-                            Id = $"ble-{bleDevice.BluetoothAddress:X}",
-                            Name = string.IsNullOrWhiteSpace(name) ? "Bluetooth LE Cihazı" : name,
-                            Category = GuessCategory(name),
-                            Connection = ConnectionKind.Bluetooth,
-                            BatteryPercent = percent,
-                            IsCharging = false,
-                            IsConnected = true
-                        });
-                    }
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    throw;
-                }
-                catch
-                {
-                    // Skip unreachable or timed-out BLE devices
-                }
-            }
+                Id = $"bt-pnp-{target.ContainerId}",
+                Name = name,
+                Category = GuessCategory(name),
+                Connection = ConnectionKind.Bluetooth,
+                BatteryPercent = percent.Value,
+                IsCharging = false,
+                IsConnected = true
+            };
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
         }
         catch
         {
-            // Bluetooth radio may be off or unavailable
+            return null;
+        }
+    }
+
+    private static async Task<int?> TryReadGattBatteryLevelAsync(
+        BluetoothLEDevice bleDevice,
+        BluetoothCacheMode cacheMode,
+        CancellationToken ct)
+    {
+        var servicesResult = await bleDevice.GetGattServicesForUuidAsync(
+            GattServiceUuids.Battery, cacheMode).AsTask(ct);
+
+        if (servicesResult.Status != GattCommunicationStatus.Success || servicesResult.Services.Count == 0)
+            return null;
+
+        using var batteryService = servicesResult.Services[0];
+        var charsResult = await batteryService.GetCharacteristicsForUuidAsync(
+            GattCharacteristicUuids.BatteryLevel, cacheMode).AsTask(ct);
+
+        if (charsResult.Status != GattCommunicationStatus.Success || charsResult.Characteristics.Count == 0)
+            return null;
+
+        var readResult = await charsResult.Characteristics[0].ReadValueAsync(cacheMode).AsTask(ct);
+        if (readResult.Status == GattCommunicationStatus.Success && readResult.Value.Length > 0)
+        {
+            using var reader = DataReader.FromBuffer(readResult.Value);
+            return Math.Clamp((int)reader.ReadByte(), 0, 100);
         }
 
-        return results;
+        return null;
     }
 
     public static DeviceCategory GuessCategory(string? name)

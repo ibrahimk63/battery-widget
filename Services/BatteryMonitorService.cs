@@ -99,6 +99,8 @@ public sealed class BatteryMonitorService : IDisposable
                 .ThenBy(d => d.Name)
                 .ToList();
 
+            DeduplicateBluetoothAndXInputGamepads(merged);
+
             CurrentDevices = merged;
             _notificationService.Evaluate(merged, _settings);
             DevicesUpdated?.Invoke(this, merged);
@@ -107,6 +109,29 @@ public sealed class BatteryMonitorService : IDisposable
         finally
         {
             _pollLock.Release();
+        }
+    }
+
+    public static void DeduplicateBluetoothAndXInputGamepads(List<DeviceBatteryInfo> devices)
+    {
+        int btGamepadsWithPercent = devices.Count(d =>
+            d.IsConnected &&
+            d.Connection == ConnectionKind.Bluetooth &&
+            d.Category == DeviceCategory.Gamepad &&
+            d.BatteryPercent >= 0);
+
+        if (btGamepadsWithPercent == 0)
+            return;
+
+        int toRemove = btGamepadsWithPercent;
+        for (int i = devices.Count - 1; i >= 0 && toRemove > 0; i--)
+        {
+            var d = devices[i];
+            if (d.Id.StartsWith("xbox-pad-", StringComparison.OrdinalIgnoreCase) && d.BatteryPercent < 0)
+            {
+                devices.RemoveAt(i);
+                toRemove--;
+            }
         }
     }
 

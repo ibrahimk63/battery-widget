@@ -189,4 +189,62 @@ public class ProviderAndServiceTests
         Assert.Equal("JBL Tune 760NC", BluetoothBatteryProvider.NormalizeBluetoothName("JBL Tune 760NC Hands-Free AG Audio"));
         Assert.Equal("AirPods Pro", BluetoothBatteryProvider.NormalizeBluetoothName("AirPods Pro Stereo"));
     }
+
+    [Fact]
+    public void Bluetooth_FilterAndMapConnectedPnpBatteries_SupportsMultipleDevicesAndFiltersStaleNames()
+    {
+        var connected = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["cid_headset"] = "Sony WH-1000XM5",
+            ["cid_xbox"] = "Xbox Wireless Controller"
+        };
+
+        var rawPnp = new List<(string ContainerId, byte BatteryPercent, string? FallbackName)>
+        {
+            ("cid_headset", 80, "Bluetooth Audio"),
+            ("cid_xbox", 65, "Old Disconnected Headset"), // stale/child PnP name must be overridden by AEP name
+            ("cid_stale_old", 40, "Old Headphone")         // not connected -> must be filtered out
+        };
+
+        var mapped = BluetoothBatteryProvider.FilterAndMapConnectedPnpBatteries(rawPnp, connected);
+
+        Assert.Equal(2, mapped.Count);
+        Assert.Contains(mapped, d => d.Name == "Sony WH-1000XM5" && d.BatteryPercent == 80 && d.Category == DeviceCategory.Headset);
+        Assert.Contains(mapped, d => d.Name == "Xbox Wireless Controller" && d.BatteryPercent == 65 && d.Category == DeviceCategory.Gamepad);
+        Assert.DoesNotContain(mapped, d => d.Name.Contains("Old", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void MonitorService_DeduplicateBluetoothAndXInputGamepads_RemovesDuplicateQualitativeXInput()
+    {
+        var list = new List<DeviceBatteryInfo>
+        {
+            new()
+            {
+                Id = "bt-pnp-xbox1",
+                Name = "Xbox Wireless Controller",
+                Category = DeviceCategory.Gamepad,
+                Connection = ConnectionKind.Bluetooth,
+                BatteryPercent = 72,
+                IsConnected = true
+            },
+            new()
+            {
+                Id = "xbox-pad-0",
+                Name = "Xbox Controller",
+                Category = DeviceCategory.Gamepad,
+                Connection = ConnectionKind.Wireless24Ghz,
+                BatteryPercent = -1,
+                DisplayLevelText = "Orta",
+                VisualFillPercent = 65,
+                IsConnected = true
+            }
+        };
+
+        BatteryMonitorService.DeduplicateBluetoothAndXInputGamepads(list);
+
+        Assert.Single(list);
+        Assert.Equal(72, list[0].BatteryPercent);
+        Assert.Equal(ConnectionKind.Bluetooth, list[0].Connection);
+    }
 }
