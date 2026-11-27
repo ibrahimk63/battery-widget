@@ -1,13 +1,15 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-27T16:05:00Z",
+  "updatedAt": "2026-11-27T20:02:20.053Z",
   "reportEndpointUrl": "https://battery-widget.ibrqhimklc.workers.dev",
   "profiles": [
     {
       "name": "Attack Shark R5 Ultra",
       "category": "Mouse",
       "vendorIdHex": "0x373E",
-      "productIdsHex": ["0x0047"],
+      "productIdsHex": [
+        "0x0047"
+      ],
       "queryPacketHex": "08 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00 49",
       "useFeatureReport": false,
       "readPassiveInput": false,
@@ -88,6 +90,27 @@
       "batteryMask": 127,
       "chargingByteIndex": 3,
       "chargingMask": 128,
+      "maxBatteryValue": 100
+    },
+    {
+      "name": "GHOST PRO gaming mouse",
+      "category": "Mouse",
+      "vendorIdHex": "0x3554",
+      "productIdsHex": [
+        "0xF511"
+      ],
+      "queryPacketHex": "08 03",
+      "useFeatureReport": false,
+      "readPassiveInput": false,
+      "expectedReportId": 8,
+      "batteryByteIndex": 6,
+      "batteryMask": 255,
+      "chargingByteIndex": 7,
+      "chargingEqualsValue": 1,
+      "voltageHighByteIndex": 8,
+      "voltageLowByteIndex": 9,
+      "checksumMode": "Compx55",
+      "checksumByteIndex": 16,
       "maxBatteryValue": 100
     }
   ]
