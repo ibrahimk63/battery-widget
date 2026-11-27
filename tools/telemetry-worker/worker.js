@@ -43,25 +43,45 @@ export default {
         return `• **${name}** — \`${vid}:${pid}\` (In:${inLen} Out:${outLen} Feat:${featLen})`;
       });
 
-      if (env.DISCORD_WEBHOOK_URL) {
-        await fetch(env.DISCORD_WEBHOOK_URL, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            embeds: [
-              {
-                title: "BatteryWidget — Yeni Anonim Cihaz Raporu",
-                color: 2278750,
-                description: lines.join("\n"),
-                footer: { text: `v${appVer} • Algılanan cihaz sayısı: ${detectedCount}` },
-                timestamp: new Date().toISOString()
-              }
-            ]
-          })
+      const webhookUrl = typeof env.DISCORD_WEBHOOK_URL === "string" ? env.DISCORD_WEBHOOK_URL.trim() : "";
+      if (!webhookUrl) {
+        return new Response(JSON.stringify({ ok: false, error: "webhook_not_configured" }), {
+          status: 503,
+          headers: { "content-type": "application/json" }
         });
       }
 
-      return new Response(JSON.stringify({ ok: true, count: candidates.length }), {
+      const discordResp = await fetch(webhookUrl, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "user-agent": "BatteryWidget-Telemetry/1.1"
+        },
+        body: JSON.stringify({
+          embeds: [
+            {
+              title: "BatteryWidget — Yeni Anonim Cihaz Raporu",
+              color: 2278750,
+              description: lines.join("\n"),
+              footer: { text: `v${appVer} • Algılanan cihaz sayısı: ${detectedCount}` },
+              timestamp: new Date().toISOString()
+            }
+          ]
+        })
+      });
+
+      if (!discordResp.ok) {
+        return new Response(JSON.stringify({
+          ok: false,
+          error: "discord_rejected",
+          discordStatus: discordResp.status
+        }), {
+          status: 502,
+          headers: { "content-type": "application/json" }
+        });
+      }
+
+      return new Response(JSON.stringify({ ok: true, count: candidates.length, delivered: true }), {
         status: 200,
         headers: { "content-type": "application/json" }
       });
