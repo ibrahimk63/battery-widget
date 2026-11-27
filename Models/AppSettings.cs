@@ -3,6 +3,12 @@ using System.Text.Json;
 
 namespace BatteryWidget.Models;
 
+public sealed class HiddenDeviceEntry
+{
+    public string Id { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+}
+
 public sealed class AppSettings
 {
     public double WindowLeft { get; set; } = double.NaN;
@@ -13,6 +19,7 @@ public sealed class AppSettings
     public int LowBatteryThreshold { get; set; } = 15;
     public bool EnableLowBatteryNotifications { get; set; } = true;
     public bool StartWithWindows { get; set; } = false;
+    public List<HiddenDeviceEntry> HiddenDevices { get; set; } = [];
 
     private static readonly string SettingsDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),

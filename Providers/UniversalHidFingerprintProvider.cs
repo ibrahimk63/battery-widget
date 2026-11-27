@@ -9,6 +9,7 @@ namespace BatteryWidget.Providers;
 /// Detects devices by HID Report Descriptor structure regardless of brand:
 /// - Strategy A: Rapoo / 8K wireless mice (Input Report ID 0x07, >= 19 bytes)
 /// - Strategy B: Standard HID Battery Input Reports (Usage 0x06/0x20, 0x85/0x65, 0x85/0x66)
+/// - Strategy C: Hechi / PAW3950 8K wireless mice (Report ID 0x0B, 64B Output/Input)
 /// </summary>
 public sealed class UniversalHidFingerprintProvider : IBatteryProvider
 {
@@ -20,13 +21,15 @@ public sealed class UniversalHidFingerprintProvider : IBatteryProvider
     {
         None,
         Rapoo8KInput07,
-        StandardInputBattery
+        StandardInputBattery,
+        Hechi8KReport0B
     }
 
     private sealed record CachedFingerprint(
         FingerprintKind Kind,
         byte ReportId,
         int InputLength,
+        int OutputLength,
         int ByteOffset,
         int BitShift,
         int BitMask,
@@ -69,6 +72,7 @@ public sealed class UniversalHidFingerprintProvider : IBatteryProvider
                 {
                     FingerprintKind.Rapoo8KInput07 => PollRapoo8K(device, fp),
                     FingerprintKind.StandardInputBattery => PollStandardInputBattery(device, fp),
+                    FingerprintKind.Hechi8KReport0B => PollHechi8K(device, fp),
                     _ => null
                 };
 
@@ -88,15 +92,22 @@ public sealed class UniversalHidFingerprintProvider : IBatteryProvider
         try
         {
             int inLen = device.GetMaxInputReportLength();
+            int outLen = device.GetMaxOutputReportLength();
             if (inLen < 2)
-                return new CachedFingerprint(FingerprintKind.None, 0, 0, 0, 0, 0, 0, 100);
+                return new CachedFingerprint(FingerprintKind.None, 0, 0, 0, 0, 0, 0, 0, 100);
 
             var desc = device.GetReportDescriptor();
 
             // Strategy A: Rapoo / 8K receiver & mouse telemetry (Input Report ID 0x07, length >= 19)
             if (inLen >= 19 && desc.InputReports.Any(r => r.ReportID == 0x07 && r.Length >= 19))
             {
-                return new CachedFingerprint(FingerprintKind.Rapoo8KInput07, 0x07, inLen, 8, 0, 0xFF, 0, 100);
+                return new CachedFingerprint(FingerprintKind.Rapoo8KInput07, 0x07, inLen, outLen, 8, 0, 0xFF, 0, 100);
+            }
+
+            // Strategy C: Hechi / PAW3950 8K mouse (Report ID 0x0B, >= 32B Output/Input)
+            if (outLen >= 32 && inLen >= 32 && desc.OutputReports.Any(r => r.ReportID == 0x0B))
+            {
+                return new CachedFingerprint(FingerprintKind.Hechi8KReport0B, 0x0B, inLen, outLen, 0, 0, 0xFF, 0, 100);
             }
 
             // Strategy B: Standard HID Battery usage inside an Input Report
@@ -126,6 +137,7 @@ public sealed class UniversalHidFingerprintProvider : IBatteryProvider
                         FingerprintKind.StandardInputBattery,
                         report.ReportID,
                         Math.Max(report.Length, inLen),
+                        outLen,
                         byteOffset,
                         bitShift,
                         bitMask,
@@ -139,7 +151,7 @@ public sealed class UniversalHidFingerprintProvider : IBatteryProvider
             // Ignore unreadable descriptors
         }
 
-        return new CachedFingerprint(FingerprintKind.None, 0, 0, 0, 0, 0, 0, 100);
+        return new CachedFingerprint(FingerprintKind.None, 0, 0, 0, 0, 0, 0, 0, 100);
     }
 
     private static DeviceBatteryInfo? PollRapoo8K(HidDevice device, CachedFingerprint fp)
@@ -179,7 +191,56 @@ public sealed class UniversalHidFingerprintProvider : IBatteryProvider
         }
         catch
         {
-            // Ignore read timeout (mouse idle)
+            // Ignore read timeout
+        }
+
+        return null;
+    }
+
+    private static DeviceBatteryInfo? PollHechi8K(HidDevice device, CachedFingerprint fp)
+    {
+        try
+        {
+            if (!device.TryOpen(out var stream))
+                return null;
+
+            using (stream)
+            {
+                stream.ReadTimeout = 250;
+                stream.WriteTimeout = 250;
+                var req = new byte[fp.OutputLength];
+                req[0] = 0x0B;
+                req[1] = 0x03; // Hechi battery query
+                stream.Write(req, 0, req.Length);
+
+                var resp = new byte[fp.InputLength];
+                for (int i = 0; i < 3; i++)
+                {
+                    int read = stream.Read(resp, 0, resp.Length);
+                    if (read < 6)
+                        break;
+
+                    if (resp[0] == 0x0B && resp[3] is >= 1 and <= 100)
+                    {
+                        bool chg = resp[4] == 1;
+                        string name = TryGetProductName(device) ?? $"8K Kablosuz Fare ({device.VendorID:X4}:{device.ProductID:X4})";
+                        return new DeviceBatteryInfo
+                        {
+                            Id = $"fp-hechi8k-{device.VendorID:X4}-{device.ProductID:X4}",
+                            Name = name,
+                            Category = DeviceCategory.Mouse,
+                            Connection = ConnectionKind.Wireless24Ghz,
+                            BatteryPercent = resp[3],
+                            IsCharging = chg,
+                            IsConnected = true
+                        };
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Ignore timeout
         }
 
         return null;
@@ -235,10 +296,6 @@ public sealed class UniversalHidFingerprintProvider : IBatteryProvider
         return null;
     }
 
-    /// <summary>
-    /// Parses Rapoo / 8K wireless mouse input reports:
-    /// byte[0] = 0x07, byte[7] = battery state (1=discharging, 2=charging), byte[8] = percentage (1..100).
-    /// </summary>
     public static (int Percent, bool IsCharging)? ParseRapoo8KReport(ReadOnlySpan<byte> data)
     {
         if (data.Length < 9 || data[0] != 0x07)

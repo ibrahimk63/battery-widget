@@ -13,6 +13,7 @@ public sealed class BatteryMonitorService : IDisposable
     private PeriodicTimer? _timer;
     private CancellationTokenSource? _cts;
     private readonly SemaphoreSlim _pollLock = new(1, 1);
+    private List<DeviceBatteryInfo> _rawDevices = [];
 
     public event EventHandler<IReadOnlyList<DeviceBatteryInfo>>? DevicesUpdated;
     public IReadOnlyList<DeviceBatteryInfo> CurrentDevices { get; private set; } = [];
@@ -100,16 +101,70 @@ public sealed class BatteryMonitorService : IDisposable
                 .ToList();
 
             DeduplicateBluetoothAndXInputGamepads(merged);
+            _rawDevices = merged;
 
-            CurrentDevices = merged;
-            _notificationService.Evaluate(merged, _settings);
-            DevicesUpdated?.Invoke(this, merged);
-            return merged;
+            var visible = FilterHiddenDevices(merged, _settings.HiddenDevices);
+            CurrentDevices = visible;
+            _notificationService.Evaluate(visible, _settings);
+            DevicesUpdated?.Invoke(this, visible);
+            return visible;
         }
         finally
         {
             _pollLock.Release();
         }
+    }
+
+    public void HideDevice(string id, string name)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+            return;
+
+        if (!_settings.HiddenDevices.Any(h => string.Equals(h.Id, id, StringComparison.OrdinalIgnoreCase)))
+        {
+            _settings.HiddenDevices.Add(new HiddenDeviceEntry { Id = id, Name = name });
+            _settings.Save();
+        }
+
+        RefreshVisibleFromRaw();
+    }
+
+    public void UnhideDevice(string id)
+    {
+        int removed = _settings.HiddenDevices.RemoveAll(h => string.Equals(h.Id, id, StringComparison.OrdinalIgnoreCase));
+        if (removed > 0)
+        {
+            _settings.Save();
+            RefreshVisibleFromRaw();
+        }
+    }
+
+    public void UnhideAllDevices()
+    {
+        if (_settings.HiddenDevices.Count > 0)
+        {
+            _settings.HiddenDevices.Clear();
+            _settings.Save();
+            RefreshVisibleFromRaw();
+        }
+    }
+
+    private void RefreshVisibleFromRaw()
+    {
+        var visible = FilterHiddenDevices(_rawDevices, _settings.HiddenDevices);
+        CurrentDevices = visible;
+        DevicesUpdated?.Invoke(this, visible);
+    }
+
+    public static List<DeviceBatteryInfo> FilterHiddenDevices(
+        IEnumerable<DeviceBatteryInfo> devices,
+        IReadOnlyCollection<HiddenDeviceEntry> hidden)
+    {
+        if (hidden.Count == 0)
+            return devices.ToList();
+
+        var hiddenIds = hidden.Select(h => h.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return devices.Where(d => !hiddenIds.Contains(d.Id)).ToList();
     }
 
     public static void DeduplicateBluetoothAndXInputGamepads(List<DeviceBatteryInfo> devices)

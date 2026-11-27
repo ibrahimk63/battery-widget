@@ -13,16 +13,15 @@ Bilgisayarınızda .NET kurulu olmasına gerek yoktur; tek dosyayı indirip doğ
 
 - **HyperX Cloud III Wireless** (`0x03F0:0x05B7` / `0x0FCC` / `0x098D`) — 62-byte USB HID kontrol kanalı (`0x66 / 0x89` & `0x66 / 0x8A`)
 - **Darmoshark M3 V2 & Realtek 2.4GHz** (`0x0BDA:0xFFE0` / `0xFFEA` ve `0xB5`/`0xB6` destekleyen tüm Realtek alıcıları)
-- **Monster Pusat Ghost Pro, VXE, ATK, VGN, Attack Shark, Ajazz vb. (Evrensel CompX/Beken)** — Report ID `0x08` destekleyen tüm 2.4GHz kablosuz fare ve aygıtları otomatik algılar
+- **Monster Pusat Ghost Pro, Throne Repel 8K (PAW3950 8K), VXE, ATK, VGN, Attack Shark, Ajazz vb. (Evrensel CompX/Beken/PAW3950)** — Report ID `0x08` ve `0x00` destekleyen tüm 2.4GHz / 8K kablosuz fare ve aygıtları otomatik algılar
 - **Logitech (HID++ 2.0)** — Lightspeed, Bolt ve Unifying alıcılı tüm Logitech kablosuz fare/klavye/kulaklıklar (`0x1004` / `0x1000`)
 - **Razer Wireless** — 90-byte Feature Report protokolüyle kablosuz Razer fare, klavye ve kulaklıklar
-- **SteelSeries & ATK N9** — Arctis / Arctis Nova kulaklıklar ve ATK N9 (`373B:11CB`) kablosuz kulaklık
+- **SteelSeries & ATK N9 Serisi** — Arctis / Arctis Nova kulaklıklar (`0x1038`), ATK N9 Pro / Ultra (`9600-baud USB Serial` protokolü) ve ATK N9 V2 (`Bolutek HID 0x55/0x65`)
 - **Bluetooth Cihazları (Classic + BLE)** — Hem Windows PnP (`DEVPKEY_Bluetooth_Battery` — Classic Bluetooth kulaklık, fare, klavye vb.) hem de BLE GATT Battery Service (`0x180F` / `0x2A19`) cihazlarını aktif bağlantı kontrolüyle çoklu olarak algılar
 - **Oyun Kolları (Xbox & PlayStation)** — Xbox Kablosuz Dongle / USB / Bluetooth kolları (`XInput` + `Windows.Gaming.Input` — gerçek yüzde veya `Dolu`/`Orta`/`Düşük`/`Boş` kademe gösterimi) ve DualSense / DualShock 4
 - **Standart USB/HID Pil Aygıtları** — Standart HID pil raporu sunan diğer harici kablosuz cihazları otomatik algılar (dizüstü bilgisayarın dahili pilini hariç tutar)
-- **Özel USB / 2.4GHz Profilleri (`profiles/*.json`)** — Kod yazmadan yeni cihazlar eklemek için JSON profil desteği (`profiles/_template.json.example`)
-- **Evrensel HID Parmak İzi Motoru** — Markadan bağımsız olarak Rapoo / 8K fareler (`0x07` 19B Input), Standart HID Input+Feature pil raporları ve ATK/Nordic/CompX cihazlarını descriptor parmak iziyle otomatik tanır
-- **Cihaz Öğret (Auto-Learn Sihirbazı)** — Tanınmayan herhangi bir yeni 2.4GHz/USB cihazın güncel pil yüzdesini girerek batarya baytını otomatik bulur ve `%AppData%\BatteryWidget\profiles\` altında kalıcı profile dönüştürür
+- **Evrensel HID Parmak İzi Motoru** — Markadan bağımsız olarak Rapoo / 8K fareler (`0x07` 19B Input), Hechi 8K (`0x0B`), Standart HID Input+Feature pil raporlarını descriptor parmak iziyle otomatik tanır
+- **Cihaz Öğret (Auto-Learn Sihirbazı) & Cihaz Kaldırma/Yönetimi** — Kartlara sağ tıklayarak istenmeyen cihazları kaldırıp gizleyebilir, Ayarlar → Cihaz Yönetimi sekmesinden geri getirebilir ve öğrenilen profilleri silebilirsiniz
 - **Genel Aygıt Tanılama**: Ayarlar → Aygıt Tanılama sekmesinden her bilgisayarın kendi bağlı USB HID, Report ID ve sanal COM portlarını tek tıkla tarama
 
 ## Özellikler

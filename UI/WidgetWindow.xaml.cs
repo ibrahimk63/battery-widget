@@ -288,6 +288,29 @@ public partial class WidgetWindow : Window
 
         stack.Children.Add(badge);
         card.Child = stack;
+
+        var cardMenu = new System.Windows.Controls.ContextMenu
+        {
+            Background = new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#181B24")),
+            Foreground = new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#F3F4F6")),
+            BorderBrush = new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#2D3343"))
+        };
+
+        var hideItem = new System.Windows.Controls.MenuItem { Header = "Bu Cihazı Kaldır / Gizle" };
+        hideItem.Click += (_, _) => _monitorService.HideDevice(device.Id, device.Name);
+
+        var refreshItem = new System.Windows.Controls.MenuItem { Header = "Şimdi Yenile" };
+        refreshItem.Click += (_, _) => _ = _monitorService.PollNowAsync();
+
+        var settingsItem = new System.Windows.Controls.MenuItem { Header = "Ayarlar & Cihaz Yönetimi" };
+        settingsItem.Click += (_, _) => _onOpenSettings();
+
+        cardMenu.Items.Add(hideItem);
+        cardMenu.Items.Add(new System.Windows.Controls.Separator());
+        cardMenu.Items.Add(refreshItem);
+        cardMenu.Items.Add(settingsItem);
+        card.ContextMenu = cardMenu;
+
         return card;
     }
 

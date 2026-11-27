@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using BatteryWidget.Models;
 using BatteryWidget.Providers;
@@ -7,6 +8,16 @@ namespace BatteryWidget.UI;
 
 public partial class SettingsWindow : Window
 {
+    private sealed record HiddenItemDisplay(string Id, string Name)
+    {
+        public override string ToString() => $"{Name} ({Id})";
+    }
+
+    private sealed record ProfileFileDisplay(string FileName, string FullPath)
+    {
+        public override string ToString() => FileName;
+    }
+
     private static readonly int[] IntervalStepsSeconds = [10, 20, 30, 60, 120, 180, 300];
 
     private readonly AppSettings _settings;
@@ -30,6 +41,7 @@ public partial class SettingsWindow : Window
 
         UpdateLabels();
         LoadLearnableDevices();
+        LoadDeviceManagementLists();
         _ = RunUniversalDiagnosticsAsync(pollFirst: false);
     }
 
@@ -190,7 +202,66 @@ public partial class SettingsWindow : Window
         var category = BluetoothBatteryProvider.GuessCategory(candidate.DeviceName);
         string savedPath = AutoLearnService.SaveLearnedProfile(candidate, candidate.DeviceName, category);
         LearnStatusText.Text = $"Kaydedildi: {savedPath}";
+        LoadDeviceManagementLists();
         _ = _monitorService.PollNowAsync();
+    }
+
+    private void LoadDeviceManagementLists()
+    {
+        HiddenDevicesListBox.ItemsSource = _settings.HiddenDevices
+            .Select(h => new HiddenItemDisplay(h.Id, string.IsNullOrWhiteSpace(h.Name) ? h.Id : h.Name))
+            .ToList();
+
+        var profiles = new List<ProfileFileDisplay>();
+        string dir = JsonHidProfileProvider.UserProfilesDirectory;
+        if (Directory.Exists(dir))
+        {
+            foreach (var file in Directory.EnumerateFiles(dir, "*.json"))
+                profiles.Add(new ProfileFileDisplay(Path.GetFileName(file), file));
+        }
+        SavedProfilesListBox.ItemsSource = profiles;
+    }
+
+    private void UnhideSelected_Click(object sender, RoutedEventArgs e)
+    {
+        if (HiddenDevicesListBox.SelectedItem is not HiddenItemDisplay item)
+        {
+            ManageStatusText.Text = "Geri getirmek için gizlenen listeden bir cihaz seçin.";
+            return;
+        }
+
+        _monitorService.UnhideDevice(item.Id);
+        LoadDeviceManagementLists();
+        ManageStatusText.Text = $"{item.Name} geri getirildi.";
+    }
+
+    private void UnhideAll_Click(object sender, RoutedEventArgs e)
+    {
+        _monitorService.UnhideAllDevices();
+        LoadDeviceManagementLists();
+        ManageStatusText.Text = "Gizlenen tüm cihazlar geri getirildi.";
+    }
+
+    private void DeleteProfile_Click(object sender, RoutedEventArgs e)
+    {
+        if (SavedProfilesListBox.SelectedItem is not ProfileFileDisplay item)
+        {
+            ManageStatusText.Text = "Silmek için profil listesinden bir dosya seçin.";
+            return;
+        }
+
+        try
+        {
+            if (File.Exists(item.FullPath))
+                File.Delete(item.FullPath);
+            LoadDeviceManagementLists();
+            ManageStatusText.Text = $"{item.FileName} silindi.";
+            _ = _monitorService.PollNowAsync();
+        }
+        catch (Exception ex)
+        {
+            ManageStatusText.Text = $"Silme hatası: {ex.Message}";
+        }
     }
 
     private void Save_Click(object sender, RoutedEventArgs e)

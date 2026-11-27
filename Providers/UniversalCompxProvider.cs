@@ -5,9 +5,9 @@ using HidSharp;
 namespace BatteryWidget.Providers;
 
 /// <summary>
-/// Universal CompX / Beken / Nordic 2.4GHz wireless peripheral battery provider.
-/// Covers Monster Pusat Ghost Pro, VXE, ATK, VGN, Attack Shark, Ajazz, Zaopin, Scyrox, Pulsar, MCHOSE,
-/// and any unknown USB/2.4GHz HID device whose Report Descriptor exposes Report ID 0x08 (17B/64B Output or Feature).
+/// Universal CompX / Beken / Nordic / PAW3950 8K wireless peripheral battery provider.
+/// Covers Monster Pusat Ghost Pro, Throne Repel 8K, VXE, ATK, VGN, Attack Shark, Ajazz, Zaopin, Scyrox, Pulsar, MCHOSE,
+/// and any unknown USB/2.4GHz HID device exposing Report ID 0x08 OR unnumbered 17B/64B Output/Feature reports.
 /// </summary>
 public sealed class UniversalCompxProvider : IBatteryProvider
 {
@@ -27,11 +27,13 @@ public sealed class UniversalCompxProvider : IBatteryProvider
         int InputLength,
         int FeatureLength,
         bool SupportsOut08,
-        bool SupportsFeat08);
+        bool SupportsOut00,
+        bool SupportsFeat08,
+        bool SupportsFeat00);
 
     private readonly ConcurrentDictionary<string, CachedTarget?> _cache = new(StringComparer.OrdinalIgnoreCase);
 
-    public string ProviderName => "Evrensel CompX / 2.4GHz HID (Monster, VXE, ATK vb.)";
+    public string ProviderName => "Evrensel CompX / PAW3950 8K HID (Monster, Repel, VXE, ATK vb.)";
 
     public Task<IReadOnlyList<DeviceBatteryInfo>> PollDevicesAsync(CancellationToken cancellationToken = default)
     {
@@ -88,12 +90,14 @@ public sealed class UniversalCompxProvider : IBatteryProvider
 
             var desc = device.GetReportDescriptor();
             bool hasOut08 = outLen >= 17 && inLen >= 17 && desc.OutputReports.Any(r => r.ReportID == 0x08);
+            bool hasOut00 = outLen is 17 or 18 or 64 or 65 && inLen >= 17 && desc.OutputReports.Any(r => r.ReportID == 0x00);
             bool hasFeat08 = featLen >= 17 && desc.FeatureReports.Any(r => r.ReportID == 0x08);
+            bool hasFeat00 = featLen is 17 or 18 or 64 or 65 && desc.FeatureReports.Any(r => r.ReportID == 0x00);
 
-            if (!hasOut08 && !hasFeat08)
+            if (!hasOut08 && !hasOut00 && !hasFeat08 && !hasFeat00)
                 return null;
 
-            return new CachedTarget(device.DevicePath, outLen, inLen, featLen, hasOut08, hasFeat08);
+            return new CachedTarget(device.DevicePath, outLen, inLen, featLen, hasOut08, hasOut00, hasFeat08, hasFeat00);
         }
         catch
         {
@@ -115,7 +119,6 @@ public sealed class UniversalCompxProvider : IBatteryProvider
 
                 if (target.SupportsOut08)
                 {
-                    // 1) Standard 17-byte CompX/VXE/Monster query: [0x08, 0x04, ..., checksum 0x49 at byte 16]
                     var req17 = new byte[target.OutputLength];
                     req17[0] = 0x08;
                     req17[1] = 0x04;
@@ -125,7 +128,6 @@ public sealed class UniversalCompxProvider : IBatteryProvider
                     if (TryWriteAndRead(stream, req17, target.InputLength) is { } parsed17)
                         return BuildInfo(device, parsed17.Percent, parsed17.IsCharging);
 
-                    // 2) Extended 64-byte CompX/ATK query: [0x08, 0x7D, 0x72, ...]
                     if (target.OutputLength >= 64)
                     {
                         var req64 = new byte[target.OutputLength];
@@ -138,6 +140,20 @@ public sealed class UniversalCompxProvider : IBatteryProvider
                     }
                 }
 
+                if (target.SupportsOut00)
+                {
+                    // Zero-prefixed unnumbered Report ID 0x00 before [0x08, 0x04, ..., 0x49]
+                    var req00 = new byte[target.OutputLength];
+                    req00[0] = 0x00;
+                    req00[1] = 0x08;
+                    req00[2] = 0x04;
+                    if (req00.Length > 17)
+                        req00[17] = 0x49;
+
+                    if (TryWriteAndRead(stream, req00, target.InputLength) is { } parsed00)
+                        return BuildInfo(device, parsed00.Percent, parsed00.IsCharging);
+                }
+
                 if (target.SupportsFeat08)
                 {
                     var reqFeat = new byte[target.FeatureLength];
@@ -146,21 +162,21 @@ public sealed class UniversalCompxProvider : IBatteryProvider
                     if (reqFeat.Length > 16)
                         reqFeat[16] = 0x49;
 
-                    try
-                    {
-                        stream.SetFeature(reqFeat);
-                        var respFeat = new byte[target.FeatureLength];
-                        respFeat[0] = 0x08;
-                        stream.GetFeature(respFeat);
+                    if (TryFeatureQuery(stream, reqFeat, 0x08) is { } parsedFeat)
+                        return BuildInfo(device, parsedFeat.Percent, parsedFeat.IsCharging);
+                }
 
-                        var parsed = ParseCompxResponse(respFeat);
-                        if (parsed.HasValue)
-                            return BuildInfo(device, parsed.Value.Percent, parsed.Value.IsCharging);
-                    }
-                    catch
-                    {
-                        // Ignore unsupported feature request
-                    }
+                if (target.SupportsFeat00)
+                {
+                    var reqFeat00 = new byte[target.FeatureLength];
+                    reqFeat00[0] = 0x00;
+                    reqFeat00[1] = 0x08;
+                    reqFeat00[2] = 0x04;
+                    if (reqFeat00.Length > 17)
+                        reqFeat00[17] = 0x49;
+
+                    if (TryFeatureQuery(stream, reqFeat00, 0x00) is { } parsedFeat00)
+                        return BuildInfo(device, parsedFeat00.Percent, parsedFeat00.IsCharging);
                 }
             }
         }
@@ -170,6 +186,22 @@ public sealed class UniversalCompxProvider : IBatteryProvider
         }
 
         return null;
+    }
+
+    private static (int Percent, bool IsCharging)? TryFeatureQuery(HidStream stream, byte[] reqFeat, byte reportId)
+    {
+        try
+        {
+            stream.SetFeature(reqFeat);
+            var respFeat = new byte[reqFeat.Length];
+            respFeat[0] = reportId;
+            stream.GetFeature(respFeat);
+            return ParseCompxResponse(respFeat);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static (int Percent, bool IsCharging)? TryWriteAndRead(HidStream stream, byte[] req, int inputLength)
@@ -198,23 +230,24 @@ public sealed class UniversalCompxProvider : IBatteryProvider
     }
 
     /// <summary>
-    /// Parses CompX/Beken/Monster/VXE/ATK HID responses:
-    /// - Standard: [0x08, 0x04, ..., percent at 6, charging at 7]
-    /// - Extended: [0x08, 0x72, ..., percent at 6, charging at 7]
+    /// Parses CompX/Beken/Monster/VXE/ATK/PAW3950 HID responses:
+    /// - Standard: [0x08, 0x04/0x72, ..., percent at 6, charging at 7]
+    /// - Zero-prefixed unnumbered Report ID 0x00: [0x00, 0x08, 0x04/0x72, ..., percent at 7, charging at 8]
     /// </summary>
     public static (int Percent, bool IsCharging)? ParseCompxResponse(ReadOnlySpan<byte> data)
     {
-        if (data.Length < 8 || data[0] != 0x08)
-            return null;
-
-        if (data[1] == 0x04 || data[1] == 0x72)
+        if (data.Length >= 8 && data[0] == 0x08 && (data[1] == 0x04 || data[1] == 0x72))
         {
             int pct = data[6];
             if (pct is >= 1 and <= 100)
-            {
-                bool isCharging = data[7] == 1;
-                return (pct, isCharging);
-            }
+                return (pct, data[7] == 1);
+        }
+
+        if (data.Length >= 9 && data[0] == 0x00 && data[1] == 0x08 && (data[2] == 0x04 || data[2] == 0x72))
+        {
+            int pct = data[7];
+            if (pct is >= 1 and <= 100)
+                return (pct, data[8] == 1);
         }
 
         return null;
@@ -248,6 +281,8 @@ public sealed class UniversalCompxProvider : IBatteryProvider
 
         if (name.Contains("pusat", StringComparison.OrdinalIgnoreCase) ||
             name.Contains("ghost", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("repel", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("throne", StringComparison.OrdinalIgnoreCase) ||
             name.Contains("vxe", StringComparison.OrdinalIgnoreCase) ||
             name.Contains("atk", StringComparison.OrdinalIgnoreCase) ||
             name.Contains("vgn", StringComparison.OrdinalIgnoreCase) ||

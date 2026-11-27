@@ -391,4 +391,77 @@ public class ProviderAndServiceTests
         Assert.NotNull(parsed);
         Assert.Equal(64, parsed.Value.Percent);
     }
+
+    [Fact]
+    public void HeadsetVendors_ParseAtkN9SerialBattery_ParsesPercentAndCharging()
+    {
+        var pkt = new byte[64];
+        pkt[0] = 0x04; // len
+        pkt[1] = 0x00; // AUTH
+        pkt[2] = 0x03; // GetBattery
+        pkt[4] = 76;   // 76%, not charging
+        var res = HeadsetVendorsProvider.ParseAtkN9SerialBattery(pkt);
+        Assert.NotNull(res);
+        Assert.Equal(76, res.Value.Percent);
+        Assert.False(res.Value.IsCharging);
+
+        pkt[4] = 0x80 | 88; // bit 7 = charging
+        var resChg = HeadsetVendorsProvider.ParseAtkN9SerialBattery(pkt);
+        Assert.NotNull(resChg);
+        Assert.Equal(88, resChg.Value.Percent);
+        Assert.True(resChg.Value.IsCharging);
+    }
+
+    [Fact]
+    public void HeadsetVendors_ParseAtkN9BolutekBattery_ParsesReport55AndRaw65()
+    {
+        byte[] rep55 = [0x55, 0x65, 67, 0x02];
+        var res55 = HeadsetVendorsProvider.ParseAtkN9BolutekBattery(rep55);
+        Assert.NotNull(res55);
+        Assert.Equal(67, res55.Value.Percent);
+        Assert.True(res55.Value.IsCharging);
+
+        byte[] raw65 = [0x65, 52, 0x01];
+        var res65 = HeadsetVendorsProvider.ParseAtkN9BolutekBattery(raw65);
+        Assert.NotNull(res65);
+        Assert.Equal(52, res65.Value.Percent);
+        Assert.False(res65.Value.IsCharging);
+    }
+
+    [Fact]
+    public void UniversalCompx_ParseCompxResponse_ParsesZeroPrefixedPaw3950Frame()
+    {
+        var resp = new byte[18];
+        resp[0] = 0x00;
+        resp[1] = 0x08;
+        resp[2] = 0x04;
+        resp[7] = 91;
+        resp[8] = 1;
+        var parsed = UniversalCompxProvider.ParseCompxResponse(resp);
+        Assert.NotNull(parsed);
+        Assert.Equal(91, parsed.Value.Percent);
+        Assert.True(parsed.Value.IsCharging);
+    }
+
+    [Fact]
+    public void MonitorService_FilterHiddenDevices_ExcludesHiddenIdsAndRestoresWhenRemoved()
+    {
+        var devices = new List<DeviceBatteryInfo>
+        {
+            new() { Id = "dev-a", Name = "A", BatteryPercent = 80 },
+            new() { Id = "dev-b", Name = "B", BatteryPercent = 50 }
+        };
+        var hidden = new List<HiddenDeviceEntry>
+        {
+            new() { Id = "dev-b", Name = "B" }
+        };
+
+        var visible = BatteryMonitorService.FilterHiddenDevices(devices, hidden);
+        Assert.Single(visible);
+        Assert.Equal("dev-a", visible[0].Id);
+
+        hidden.Clear();
+        var restored = BatteryMonitorService.FilterHiddenDevices(devices, hidden);
+        Assert.Equal(2, restored.Count);
+    }
 }
