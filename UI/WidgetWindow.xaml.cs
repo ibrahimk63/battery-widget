@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using System.Windows.Threading;
 using BatteryWidget.Models;
 using BatteryWidget.Services;
 using WpfBrush = System.Windows.Media.Brush;
@@ -23,7 +24,14 @@ public partial class WidgetWindow : Window
     private readonly BatteryMonitorService _monitorService;
     private readonly Action _onOpenSettings;
     private readonly Action _onExit;
+    private readonly DispatcherTimer _dockGuardianTimer;
+
     private bool _isInitializing = true;
+    private bool _isDockedToTaskbar;
+    private bool _isDragging;
+    private bool _isApplyingLayout;
+    private bool _isHiddenByUser;
+    private bool _isTemporarilyHidden;
 
     private IReadOnlyList<DeviceBatteryInfo> _allDevices = [];
     private int _currentPage;
@@ -41,9 +49,36 @@ public partial class WidgetWindow : Window
         _onOpenSettings = onOpenSettings;
         _onExit = onExit;
 
+        _dockGuardianTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(500)
+        };
+        _dockGuardianTimer.Tick += OnDockGuardianTick;
+
+        SourceInitialized += (_, _) => TaskbarDockService.ApplyToolWindowStyle(this);
+        Loaded += Window_Loaded;
+
+        if (_settings.IsDockedToTaskbar)
+        {
+            _isDockedToTaskbar = true;
+            RootBorder.Visibility = Visibility.Collapsed;
+            TaskbarRootBorder.Visibility = Visibility.Visible;
+            DockToggleMenuItem.Header = "Masaüstüne Ayır";
+            Topmost = true;
+            Opacity = 1.0;
+        }
+
         PositionWindow();
         ApplySettings();
         _isInitializing = false;
+    }
+
+    private void Window_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (_isDockedToTaskbar)
+        {
+            EnterTaskbarDockMode(_settings.TaskbarDockLeft, save: false);
+        }
     }
 
     private void PositionWindow()
@@ -63,9 +98,27 @@ public partial class WidgetWindow : Window
 
     public void ApplySettings()
     {
-        Topmost = _settings.AlwaysOnTop;
         AlwaysOnTopMenuItem.IsChecked = _settings.AlwaysOnTop;
-        Opacity = Math.Clamp(_settings.Opacity, 0.35, 1.0);
+
+        if (_settings.IsDockedToTaskbar != _isDockedToTaskbar)
+        {
+            if (_settings.IsDockedToTaskbar)
+                EnterTaskbarDockMode(_settings.TaskbarDockLeft, save: false);
+            else
+                ExitTaskbarDockMode(restoreAtCurrentDrop: false, save: true);
+            return;
+        }
+
+        if (_isDockedToTaskbar)
+        {
+            Topmost = true;
+            Opacity = 1.0;
+        }
+        else
+        {
+            Topmost = _settings.AlwaysOnTop;
+            Opacity = Math.Clamp(_settings.Opacity, 0.35, 1.0);
+        }
     }
 
     public void UpdateDevices(IReadOnlyList<DeviceBatteryInfo> devices)
@@ -78,18 +131,85 @@ public partial class WidgetWindow : Window
         RenderCurrentPage();
     }
 
+    public void ToggleUserVisibility()
+    {
+        if (IsVisible)
+        {
+            _isHiddenByUser = true;
+            _isTemporarilyHidden = false;
+            Hide();
+        }
+        else
+        {
+            _isHiddenByUser = false;
+            _isTemporarilyHidden = false;
+            Show();
+            if (_isDockedToTaskbar)
+            {
+                SnapToTaskbar(_settings.TaskbarDockLeft, save: false);
+                TaskbarDockService.EnsureAboveTaskbar(this);
+            }
+            else
+            {
+                Activate();
+            }
+        }
+    }
+
+    public void ToggleTaskbarDock()
+    {
+        if (_isDockedToTaskbar)
+        {
+            ExitTaskbarDockMode(restoreAtCurrentDrop: false, save: true);
+        }
+        else
+        {
+            _isHiddenByUser = false;
+            if (!IsVisible)
+                Show();
+
+            double preferredLeft = !double.IsNaN(_settings.TaskbarDockLeft)
+                ? _settings.TaskbarDockLeft
+                : double.NaN;
+            EnterTaskbarDockMode(preferredLeft, save: true);
+        }
+    }
+
+    public void ShutdownDockWatcher()
+    {
+        _dockGuardianTimer.Stop();
+    }
+
     private void RenderCurrentPage(bool force = false)
     {
+        string modePrefix = _isDockedToTaskbar ? "TB|" : "DK|";
+
         if (_allDevices.Count == 0)
         {
-            if (_lastRenderedSignature != "EMPTY" || force)
+            string emptySig = modePrefix + "EMPTY";
+            if (_lastRenderedSignature != emptySig || force)
             {
-                DevicesPanel.Children.Clear();
-                PaginationPanel.Children.Clear();
-                PaginationPanel.Visibility = Visibility.Collapsed;
-                EmptyStateText.Text = "Bağlı cihaz bulunamadı";
-                EmptyStateText.Visibility = Visibility.Visible;
-                _lastRenderedSignature = "EMPTY";
+                _lastRenderedSignature = emptySig;
+
+                if (_isDockedToTaskbar)
+                {
+                    TaskbarDevicesPanel.Children.Clear();
+                    TaskbarPageIndicator.Visibility = Visibility.Collapsed;
+                    TaskbarEmptyText.Visibility = Visibility.Visible;
+                    if (IsLoaded)
+                    {
+                        UpdateLayout();
+                        SnapToTaskbar(Left, save: false);
+                    }
+                }
+                else
+                {
+                    DevicesPanel.Children.Clear();
+                    PaginationPanel.Children.Clear();
+                    PaginationPanel.Visibility = Visibility.Collapsed;
+                    EmptyStateText.Text = "Bağlı cihaz bulunamadı";
+                    EmptyStateText.Visibility = Visibility.Visible;
+                }
             }
             return;
         }
@@ -102,7 +222,7 @@ public partial class WidgetWindow : Window
             .Take(PageSize)
             .ToList();
 
-        var sigBuilder = new StringBuilder();
+        var sigBuilder = new StringBuilder(modePrefix);
         sigBuilder.Append(_currentPage).Append('/').Append(totalPages).Append('|');
         foreach (var d in pageDevices)
         {
@@ -121,15 +241,120 @@ public partial class WidgetWindow : Window
 
         _lastRenderedSignature = signature;
 
-        EmptyStateText.Visibility = Visibility.Collapsed;
-        DevicesPanel.Children.Clear();
-
-        foreach (var device in pageDevices)
+        if (_isDockedToTaskbar)
         {
-            DevicesPanel.Children.Add(BuildRadialDeviceCard(device));
-        }
+            TaskbarEmptyText.Visibility = Visibility.Collapsed;
+            TaskbarDevicesPanel.Children.Clear();
 
-        RenderPagination(totalPages);
+            for (int i = 0; i < pageDevices.Count; i++)
+            {
+                if (i > 0)
+                {
+                    TaskbarDevicesPanel.Children.Add(new Border
+                    {
+                        Width = 1,
+                        Height = 14,
+                        Background = new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#36FFFFFF")),
+                        Margin = new Thickness(8, 0, 8, 0),
+                        VerticalAlignment = VerticalAlignment.Center
+                    });
+                }
+
+                TaskbarDevicesPanel.Children.Add(BuildTaskbarDeviceItem(pageDevices[i]));
+            }
+
+            if (totalPages > 1)
+            {
+                TaskbarPageIndicator.Text = $"{_currentPage + 1}/{totalPages}";
+                TaskbarPageIndicator.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                TaskbarPageIndicator.Visibility = Visibility.Collapsed;
+            }
+
+            if (IsLoaded)
+            {
+                UpdateLayout();
+                SnapToTaskbar(Left, save: false);
+            }
+        }
+        else
+        {
+            EmptyStateText.Visibility = Visibility.Collapsed;
+            DevicesPanel.Children.Clear();
+
+            foreach (var device in pageDevices)
+            {
+                DevicesPanel.Children.Add(BuildRadialDeviceCard(device));
+            }
+
+            RenderPagination(totalPages);
+        }
+    }
+
+    private UIElement BuildTaskbarDeviceItem(DeviceBatteryInfo device)
+    {
+        var accent = GetBatteryBrush(device);
+        var percentColor = GetTaskbarPercentBrush(device);
+
+        var row = new StackPanel
+        {
+            Orientation = System.Windows.Controls.Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center,
+            Opacity = device.IsConnected ? 1.0 : 0.62,
+            ToolTip = BuildDeviceTooltip(device),
+            ContextMenu = BuildContextMenu(device, isDocked: true)
+        };
+
+        row.Children.Add(new Border
+        {
+            Width = 3,
+            Height = 14,
+            CornerRadius = new CornerRadius(1.5),
+            Background = accent,
+            Margin = new Thickness(0, 0, 5, 0),
+            VerticalAlignment = VerticalAlignment.Center
+        });
+
+        row.Children.Add(new TextBlock
+        {
+            Text = device.IconGlyph,
+            FontSize = 12.5,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 4, 0)
+        });
+
+        row.Children.Add(new TextBlock
+        {
+            Text = TaskbarDockService.FormatShortDeviceName(device.Name, 14),
+            FontSize = 11.5,
+            FontWeight = FontWeights.Medium,
+            Foreground = new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#E5E7EB")),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 5, 0)
+        });
+
+        string percentDisplay = device.IsCharging ? $"{device.PercentText}⚡" : device.PercentText;
+        row.Children.Add(new TextBlock
+        {
+            Text = percentDisplay,
+            FontFamily = new System.Windows.Media.FontFamily("Consolas, Segoe UI"),
+            FontSize = 12,
+            FontWeight = FontWeights.Bold,
+            Foreground = percentColor,
+            VerticalAlignment = VerticalAlignment.Center
+        });
+
+        return row;
+    }
+
+    private static string BuildDeviceTooltip(DeviceBatteryInfo device)
+    {
+        string status = device.IsConnected
+            ? (device.IsCharging ? $"{device.ConnectionLabel} • Şarj oluyor" : device.ConnectionLabel)
+            : (device.StatusNote ?? "Uyku / Bağlı değil");
+        return $"{device.Name}\nPil: {device.PercentText} ({status})";
     }
 
     private void RenderPagination(int totalPages)
@@ -288,30 +513,56 @@ public partial class WidgetWindow : Window
 
         stack.Children.Add(badge);
         card.Child = stack;
+        card.ContextMenu = BuildContextMenu(device, isDocked: false);
 
-        var cardMenu = new System.Windows.Controls.ContextMenu
+        return card;
+    }
+
+    private System.Windows.Controls.ContextMenu BuildContextMenu(DeviceBatteryInfo? device, bool isDocked)
+    {
+        var menu = new System.Windows.Controls.ContextMenu
         {
             Background = new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#181B24")),
             Foreground = new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#F3F4F6")),
             BorderBrush = new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#2D3343"))
         };
 
-        var hideItem = new System.Windows.Controls.MenuItem { Header = "Bu Cihazı Kaldır / Gizle" };
-        hideItem.Click += (_, _) => _monitorService.HideDevice(device.Id, device.Name);
+        if (device is not null)
+        {
+            var hideDeviceItem = new System.Windows.Controls.MenuItem { Header = "Bu Cihazı Kaldır / Gizle" };
+            hideDeviceItem.Click += (_, _) => _monitorService.HideDevice(device.Id, device.Name);
+            menu.Items.Add(hideDeviceItem);
+            menu.Items.Add(new System.Windows.Controls.Separator());
+        }
 
         var refreshItem = new System.Windows.Controls.MenuItem { Header = "Şimdi Yenile" };
         refreshItem.Click += (_, _) => _ = _monitorService.PollNowAsync();
+        menu.Items.Add(refreshItem);
 
-        var settingsItem = new System.Windows.Controls.MenuItem { Header = "Ayarlar & Cihaz Yönetimi" };
+        var dockItem = new System.Windows.Controls.MenuItem
+        {
+            Header = isDocked ? "Masaüstüne Ayır" : "Görev Çubuğuna Sabitle"
+        };
+        dockItem.Click += (_, _) => ToggleTaskbarDock();
+        menu.Items.Add(dockItem);
+
+        menu.Items.Add(new System.Windows.Controls.Separator());
+
+        var settingsItem = new System.Windows.Controls.MenuItem { Header = "Ayarlar & HID Tanılama" };
         settingsItem.Click += (_, _) => _onOpenSettings();
+        menu.Items.Add(settingsItem);
 
-        cardMenu.Items.Add(hideItem);
-        cardMenu.Items.Add(new System.Windows.Controls.Separator());
-        cardMenu.Items.Add(refreshItem);
-        cardMenu.Items.Add(settingsItem);
-        card.ContextMenu = cardMenu;
+        var hideWidgetItem = new System.Windows.Controls.MenuItem { Header = "Gizle (Sistem Tepsisi)" };
+        hideWidgetItem.Click += (_, _) => ToggleUserVisibility();
+        menu.Items.Add(hideWidgetItem);
 
-        return card;
+        menu.Items.Add(new System.Windows.Controls.Separator());
+
+        var exitItem = new System.Windows.Controls.MenuItem { Header = "Çıkış" };
+        exitItem.Click += (_, _) => _onExit();
+        menu.Items.Add(exitItem);
+
+        return menu;
     }
 
     private static Path CreateProgressArc(int percent, WpfBrush stroke)
@@ -365,6 +616,253 @@ public partial class WidgetWindow : Window
         return new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#22C55E"));
     }
 
+    private static WpfBrush GetTaskbarPercentBrush(DeviceBatteryInfo device)
+    {
+        int effective = device.EffectiveRingPercent;
+        if (!device.IsConnected || effective < 0)
+            return new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#9CA3AF"));
+        if (device.IsCharging)
+            return new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#38BDF8"));
+        if (effective <= 25 && (device.BatteryPercent <= 15 || string.Equals(device.DisplayLevelText, "Düşük", StringComparison.OrdinalIgnoreCase) || string.Equals(device.DisplayLevelText, "Boş", StringComparison.OrdinalIgnoreCase)))
+            return new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#F87171"));
+        if (effective <= 35)
+            return new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#FBBF24"));
+        return new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#4ADE80"));
+    }
+
+    private void EnterTaskbarDockMode(double desiredLeft, bool save, TaskbarSnapshot? explicitSnapshot = null)
+    {
+        _isApplyingLayout = true;
+        try
+        {
+            _isDockedToTaskbar = true;
+            _isTemporarilyHidden = false;
+            _settings.IsDockedToTaskbar = true;
+
+            RootBorder.Visibility = Visibility.Collapsed;
+            TaskbarRootBorder.Visibility = Visibility.Visible;
+            DockToggleMenuItem.Header = "Masaüstüne Ayır";
+            Topmost = true;
+            Opacity = 1.0;
+
+            RenderCurrentPage(force: true);
+            UpdateLayout();
+            SnapToTaskbar(desiredLeft, save, explicitSnapshot);
+
+            _dockGuardianTimer.Start();
+            TaskbarDockService.EnsureAboveTaskbar(this);
+        }
+        finally
+        {
+            _isApplyingLayout = false;
+        }
+    }
+
+    private void ExitTaskbarDockMode(bool restoreAtCurrentDrop, bool save)
+    {
+        _isApplyingLayout = true;
+        try
+        {
+            _dockGuardianTimer.Stop();
+            _isTemporarilyHidden = false;
+            _isDockedToTaskbar = false;
+            _settings.IsDockedToTaskbar = false;
+
+            double oldWidth = ActualWidth;
+            double oldLeft = Left;
+            double oldTop = Top;
+
+            TaskbarRootBorder.Visibility = Visibility.Collapsed;
+            RootBorder.Visibility = Visibility.Visible;
+            DockToggleMenuItem.Header = "Görev Çubuğuna Sabitle";
+            Topmost = _settings.AlwaysOnTop;
+            Opacity = Math.Clamp(_settings.Opacity, 0.35, 1.0);
+
+            RenderCurrentPage(force: true);
+            UpdateLayout();
+
+            double width = ActualWidth > 0 ? ActualWidth : 316;
+            double height = ActualHeight > 0 ? ActualHeight : 210;
+            var wa = SystemParameters.WorkArea;
+            var workRect = new ScreenRect(wa.Left, wa.Top, wa.Right, wa.Bottom);
+
+            double targetLeft;
+            double targetTop;
+            if (restoreAtCurrentDrop)
+            {
+                double centerOffset = (oldWidth - width) / 2.0;
+                targetLeft = oldLeft + centerOffset;
+                targetTop = oldTop - height - 8.0;
+                if (targetTop < workRect.Top)
+                    targetTop = oldTop;
+            }
+            else
+            {
+                targetLeft = _settings.WindowLeft;
+                targetTop = _settings.WindowTop;
+            }
+
+            var (clampedLeft, clampedTop) = TaskbarDockService.ComputeUndockedPosition(
+                targetLeft, targetTop, width, height, workRect);
+
+            Left = clampedLeft;
+            Top = clampedTop;
+
+            if (save)
+            {
+                _settings.WindowLeft = clampedLeft;
+                _settings.WindowTop = clampedTop;
+                _settings.Save();
+            }
+        }
+        finally
+        {
+            _isApplyingLayout = false;
+        }
+    }
+
+    private void SnapToTaskbar(double desiredLeft, bool save, TaskbarSnapshot? explicitSnapshot = null)
+    {
+        var snap = explicitSnapshot ?? (double.IsNaN(desiredLeft)
+            ? TaskbarDockService.GetPrimaryTaskbar(this)
+            : TaskbarDockService.GetTaskbarNearPoint(this, desiredLeft + Math.Max(ActualWidth, 120) / 2.0, Top + Math.Max(ActualHeight, 24) / 2.0));
+
+        if (!snap.Found)
+            snap = TaskbarDockService.GetPrimaryTaskbar(this);
+
+        if (!snap.Found || snap.TaskbarBoundsDip.Width <= 0 || snap.TaskbarBoundsDip.Height <= 0)
+            return;
+
+        double w = ActualWidth > 0 ? ActualWidth : 180;
+        double h = ActualHeight > 0 ? ActualHeight : 28;
+        var (newLeft, newTop) = TaskbarDockService.ComputeDockedPosition(
+            desiredLeft, w, h, snap.TaskbarBoundsDip);
+
+        _isApplyingLayout = true;
+        try
+        {
+            Left = newLeft;
+            Top = newTop;
+        }
+        finally
+        {
+            _isApplyingLayout = false;
+        }
+
+        if (save)
+        {
+            _settings.TaskbarDockLeft = newLeft;
+            _settings.Save();
+        }
+    }
+
+    private void OnDockGuardianTick(object? sender, EventArgs e)
+    {
+        if (!_isDockedToTaskbar || _isDragging || _isApplyingLayout || _isHiddenByUser)
+            return;
+
+        bool fullscreen = TaskbarDockService.IsFullscreenAppActive();
+        double centerX = Left + Math.Max(ActualWidth, 80) / 2.0;
+        double centerY = Top + Math.Max(ActualHeight, 20) / 2.0;
+        var snap = TaskbarDockService.GetTaskbarNearPoint(this, centerX, centerY);
+
+        bool shouldHide = fullscreen || !snap.Found || !snap.IsVisible || snap.IsAutoHideHidden;
+        if (shouldHide)
+        {
+            if (IsVisible)
+            {
+                _isTemporarilyHidden = true;
+                Hide();
+            }
+            return;
+        }
+
+        if (_isTemporarilyHidden && !IsVisible)
+        {
+            _isTemporarilyHidden = false;
+            Show();
+        }
+
+        if (!IsVisible)
+            return;
+
+        double w = ActualWidth > 0 ? ActualWidth : 180;
+        double h = ActualHeight > 0 ? ActualHeight : 28;
+        var (expectedLeft, expectedTop) = TaskbarDockService.ComputeDockedPosition(
+            double.IsNaN(_settings.TaskbarDockLeft) ? Left : _settings.TaskbarDockLeft,
+            w,
+            h,
+            snap.TaskbarBoundsDip);
+
+        if (Math.Abs(Left - expectedLeft) > 2.0 || Math.Abs(Top - expectedTop) > 1.5)
+        {
+            _isApplyingLayout = true;
+            try
+            {
+                Left = expectedLeft;
+                Top = expectedTop;
+            }
+            finally
+            {
+                _isApplyingLayout = false;
+            }
+        }
+
+        TaskbarDockService.EnsureAboveTaskbar(this);
+    }
+
+    private void HandleDragCompleted()
+    {
+        var cursor = TaskbarDockService.GetCursorPositionDip(this);
+        double probeX = double.IsNaN(cursor.X) ? Left + ActualWidth / 2.0 : cursor.X;
+        double probeY = double.IsNaN(cursor.Y) ? Top + ActualHeight / 2.0 : cursor.Y;
+        var snap = TaskbarDockService.GetTaskbarNearPoint(this, probeX, probeY);
+        var winRect = new ScreenRect(Left, Top, Left + ActualWidth, Top + ActualHeight);
+
+        if (!_isDockedToTaskbar)
+        {
+            if (snap.Found
+                && snap.IsVisible
+                && !snap.IsAutoHideHidden
+                && TaskbarDockService.ShouldDockOnDrop(winRect, probeX, probeY, snap.TaskbarBoundsDip))
+            {
+                double droppedLeft = Left + Math.Max(0, (ActualWidth - 180) / 2.0);
+                EnterTaskbarDockMode(droppedLeft, save: true, explicitSnapshot: snap);
+                return;
+            }
+
+            _settings.WindowLeft = Left;
+            _settings.WindowTop = Top;
+            _settings.Save();
+        }
+        else
+        {
+            if (!snap.Found
+                || TaskbarDockService.ShouldUndockOnDrop(probeX, probeY, winRect, snap.TaskbarBoundsDip))
+            {
+                ExitTaskbarDockMode(restoreAtCurrentDrop: true, save: true);
+                return;
+            }
+
+            SnapToTaskbar(Left, save: true, explicitSnapshot: snap);
+            TaskbarDockService.EnsureAboveTaskbar(this);
+        }
+    }
+
+    private void AdvancePage(int delta)
+    {
+        int totalPages = Math.Max(1, (int)Math.Ceiling(_allDevices.Count / (double)PageSize));
+        if (totalPages <= 1)
+            return;
+
+        if (delta < 0)
+            _currentPage = _currentPage < totalPages - 1 ? _currentPage + 1 : 0;
+        else if (delta > 0)
+            _currentPage = _currentPage > 0 ? _currentPage - 1 : totalPages - 1;
+
+        RenderCurrentPage(force: true);
+    }
+
     private void Window_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
         int totalPages = Math.Max(1, (int)Math.Ceiling(_allDevices.Count / (double)PageSize));
@@ -385,16 +883,46 @@ public partial class WidgetWindow : Window
         e.Handled = true;
     }
 
+    private void TaskbarPageIndicator_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        AdvancePage(-1);
+    }
+
     private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.ButtonState == MouseButtonState.Pressed)
+        if (e.ClickCount == 2 && _isDockedToTaskbar)
+        {
+            e.Handled = true;
+            _onOpenSettings();
+            return;
+        }
+
+        if (e.ButtonState != MouseButtonState.Pressed)
+            return;
+
+        _isDragging = true;
+        try
+        {
             DragMove();
+        }
+        catch
+        {
+            // DragMove can throw if mouse button was released before move began
+        }
+        finally
+        {
+            _isDragging = false;
+        }
+
+        HandleDragCompleted();
     }
 
     private void Window_LocationChanged(object? sender, EventArgs e)
     {
-        if (_isInitializing)
+        if (_isInitializing || _isDragging || _isApplyingLayout || _isDockedToTaskbar)
             return;
+
         _settings.WindowLeft = Left;
         _settings.WindowTop = Top;
         _settings.Save();
@@ -409,7 +937,8 @@ public partial class WidgetWindow : Window
         _settings.Save();
     }
 
+    private void ToggleDock_Click(object sender, RoutedEventArgs e) => ToggleTaskbarDock();
     private void Settings_Click(object sender, RoutedEventArgs e) => _onOpenSettings();
-    private void Hide_Click(object sender, RoutedEventArgs e) => Hide();
+    private void Hide_Click(object sender, RoutedEventArgs e) => ToggleUserVisibility();
     private void Exit_Click(object sender, RoutedEventArgs e) => _onExit();
 }

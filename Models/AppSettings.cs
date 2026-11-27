@@ -13,6 +13,8 @@ public sealed class AppSettings
 {
     public double WindowLeft { get; set; } = double.NaN;
     public double WindowTop { get; set; } = double.NaN;
+    public bool IsDockedToTaskbar { get; set; } = false;
+    public double TaskbarDockLeft { get; set; } = double.NaN;
     public double Opacity { get; set; } = 0.92;
     public bool AlwaysOnTop { get; set; } = true;
     public int PollIntervalSeconds { get; set; } = 60;

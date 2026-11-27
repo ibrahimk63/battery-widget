@@ -59,7 +59,8 @@ public partial class App : System.Windows.Application
             onToggleWidget: ToggleWidgetVisibility,
             onRefresh: () => _ = _monitorService.PollNowAsync(),
             onOpenSettings: OpenSettings,
-            onExit: ExitApplication);
+            onExit: ExitApplication,
+            onToggleTaskbarDock: () => _widgetWindow.ToggleTaskbarDock());
 
         _monitorService.DevicesUpdated += (_, devices) =>
         {
@@ -218,6 +219,7 @@ public partial class App : System.Windows.Application
 
     private bool LaunchSwapAndShutdown(string exePath, string stagedPath)
     {
+        _widgetWindow.ShutdownDockWatcher();
         _settings.Save();
         _monitorService.Dispose();
         _trayManager.Dispose();
@@ -229,16 +231,7 @@ public partial class App : System.Windows.Application
         return true;
     }
 
-    private void ToggleWidgetVisibility()
-    {
-        if (_widgetWindow.IsVisible)
-            _widgetWindow.Hide();
-        else
-        {
-            _widgetWindow.Show();
-            _widgetWindow.Activate();
-        }
-    }
+    private void ToggleWidgetVisibility() => _widgetWindow.ToggleUserVisibility();
 
     private void OpenSettings()
     {
@@ -262,6 +255,7 @@ public partial class App : System.Windows.Application
 
     private void ExitApplication()
     {
+        _widgetWindow.ShutdownDockWatcher();
         _settings.Save();
         _monitorService.Dispose();
         _trayManager.Dispose();

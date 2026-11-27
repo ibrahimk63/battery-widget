@@ -365,6 +365,11 @@
                                            Style="{StaticResource SubHintText}"
                                            Margin="22,2,0,12" />
 
+                                <CheckBox x:Name="DockToTaskbarCheck" Content="Görev çubuğuna sabitle (yatay şerit modu)" />
+                                <TextBlock Text="Widget'ı görev çubuğu üzerinde şeffaf ve isimli yatay pil şeridi olarak gösterir. Widget'ı görev çubuğuna sürükleyip bırakarak da geçiş yapabilirsiniz."
+                                           Style="{StaticResource SubHintText}"
+                                           Margin="22,2,0,12" />
+
                                 <CheckBox x:Name="StartWithWindowsCheck" Content="Bilgisayar açıldığında otomatik başlat" />
                                 <TextBlock Text="Windows açılışında sistem tepsisinde (sağ alt) kendiliğinden çalışır."
                                            Style="{StaticResource SubHintText}"

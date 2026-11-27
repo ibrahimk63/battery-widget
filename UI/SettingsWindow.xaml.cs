@@ -55,6 +55,7 @@ public partial class SettingsWindow : Window
         _applyUpdateAsync = applyUpdateAsync;
 
         AlwaysOnTopCheck.IsChecked = _settings.AlwaysOnTop;
+        DockToTaskbarCheck.IsChecked = _settings.IsDockedToTaskbar;
         StartWithWindowsCheck.IsChecked = _settings.StartWithWindows;
         LowBatteryNotifCheck.IsChecked = _settings.EnableLowBatteryNotifications;
         AutoAppUpdateCheck.IsChecked = _settings.EnableAutoAppUpdate;
@@ -540,6 +541,7 @@ public partial class SettingsWindow : Window
         int idx = Math.Clamp((int)Math.Round(IntervalSlider.Value), 0, IntervalStepsSeconds.Length - 1);
 
         _settings.AlwaysOnTop = AlwaysOnTopCheck.IsChecked == true;
+        _settings.IsDockedToTaskbar = DockToTaskbarCheck.IsChecked == true;
         _settings.StartWithWindows = StartWithWindowsCheck.IsChecked == true;
         _settings.EnableLowBatteryNotifications = LowBatteryNotifCheck.IsChecked == true;
         _settings.EnableAutoAppUpdate = AutoAppUpdateCheck.IsChecked == true;

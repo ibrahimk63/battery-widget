@@ -14,10 +14,13 @@ public sealed class TrayIconManager : IDisposable
         Action onToggleWidget,
         Action onRefresh,
         Action onOpenSettings,
-        Action onExit)
+        Action onExit,
+        Action? onToggleTaskbarDock = null)
     {
         var menu = new ContextMenuStrip();
         menu.Items.Add("Widget'ı Göster / Gizle", null, (_, _) => onToggleWidget());
+        if (onToggleTaskbarDock is not null)
+            menu.Items.Add("Görev Çubuğuna Sabitle / Ayır", null, (_, _) => onToggleTaskbarDock());
         menu.Items.Add("Şimdi Yenile", null, (_, _) => onRefresh());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Ayarlar & HID Tanılama", null, (_, _) => onOpenSettings());
