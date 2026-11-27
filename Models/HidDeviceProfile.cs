@@ -8,6 +8,7 @@ public sealed class HidDeviceProfile
     public List<string> ProductIdsHex { get; set; } = [];
     public string? UsagePageHex { get; set; }
     public string? QueryPacketHex { get; set; }
+    public string? WakeupPacketHex { get; set; }
     public bool UseFeatureReport { get; set; }
     public bool ReadPassiveInput { get; set; }
     public int ExpectedReportId { get; set; } = -1;
@@ -15,18 +16,66 @@ public sealed class HidDeviceProfile
     public int BatteryMask { get; set; } = 0xFF;
     public int? ChargingByteIndex { get; set; }
     public int ChargingMask { get; set; } = 0x01;
+    public int? ChargingEqualsValue { get; set; }
     public int MaxBatteryValue { get; set; } = 100;
+    public string ChecksumMode { get; set; } = "None";
+    public int ChecksumByteIndex { get; set; } = -1;
+    public int? VoltageHighByteIndex { get; set; }
+    public int? VoltageLowByteIndex { get; set; }
 
     public int ParseVendorId() => ParseHex(VendorIdHex);
     public HashSet<int> ParseProductIds() => ProductIdsHex.Select(ParseHex).ToHashSet();
     public int? ParseUsagePage() => string.IsNullOrWhiteSpace(UsagePageHex) ? null : ParseHex(UsagePageHex);
 
-    public byte[]? ParseQueryPacket()
+    public byte[]? ParseQueryPacket() => ParseHexBytes(QueryPacketHex);
+    public byte[]? ParseWakeupPacket() => ParseHexBytes(WakeupPacketHex);
+
+    public void ApplyChecksum(byte[] buffer)
     {
-        if (string.IsNullOrWhiteSpace(QueryPacketHex))
+        if (buffer.Length < 4 || string.IsNullOrWhiteSpace(ChecksumMode) ||
+            string.Equals(ChecksumMode, "None", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (string.Equals(ChecksumMode, "SumMod256", StringComparison.OrdinalIgnoreCase))
+        {
+            int idx = ChecksumByteIndex >= 0 && ChecksumByteIndex < buffer.Length
+                ? ChecksumByteIndex
+                : buffer.Length - 1;
+            int sum = 0;
+            for (int i = 1; i < idx; i++)
+                sum += buffer[i];
+            buffer[idx] = (byte)(sum & 0xFF);
+        }
+        else if (string.Equals(ChecksumMode, "Compx55", StringComparison.OrdinalIgnoreCase))
+        {
+            int idx = ChecksumByteIndex >= 0 && ChecksumByteIndex < buffer.Length
+                ? ChecksumByteIndex
+                : Math.Min(16, buffer.Length - 1);
+            int sum = 0;
+            for (int i = 0; i < idx; i++)
+                sum += buffer[i];
+            buffer[idx] = (byte)((0x55 - sum) & 0xFF);
+        }
+        else if (string.Equals(ChecksumMode, "XorCrc", StringComparison.OrdinalIgnoreCase))
+        {
+            int idx = ChecksumByteIndex >= 0 && ChecksumByteIndex < buffer.Length
+                ? ChecksumByteIndex
+                : buffer.Length - 2;
+            byte xor = 0;
+            for (int i = 2; i < idx; i++)
+                xor ^= buffer[i];
+            buffer[idx] = xor;
+        }
+    }
+
+    private static byte[]? ParseHexBytes(string? hex)
+    {
+        if (string.IsNullOrWhiteSpace(hex))
             return null;
 
-        var parts = QueryPacketHex
+        var parts = hex
             .Replace("-", " ")
             .Replace(",", " ")
             .Split(' ', StringSplitOptions.RemoveEmptyEntries);

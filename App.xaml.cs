@@ -1,5 +1,6 @@
 using System.IO;
 using System.Windows;
+using System.Windows.Threading;
 using BatteryWidget.Models;
 using BatteryWidget.Providers;
 using BatteryWidget.Services;
@@ -13,6 +14,7 @@ public partial class App : System.Windows.Application
     private BatteryMonitorService _monitorService = null!;
     private TrayIconManager _trayManager = null!;
     private WidgetWindow _widgetWindow = null!;
+    private UpdateCheckResult? _latestUpdate;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -36,6 +38,7 @@ public partial class App : System.Windows.Application
             new DarmosharkM3V2Provider(),
             new UniversalCompxProvider(),
             new WraithEcosystemProvider(),
+            new OpenSourcePeripheralsProvider(),
             new UniversalHidFingerprintProvider(),
             new LogitechHidppProvider(),
             new RazerBatteryProvider(),
@@ -66,6 +69,53 @@ public partial class App : System.Windows.Application
 
         _widgetWindow.Show();
         _monitorService.Start();
+
+        _ = RunBackgroundStartupTasksAsync();
+
+        if (!_settings.TelemetryConsentAsked)
+        {
+            Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+            {
+                try
+                {
+                    if (_settings.TelemetryConsentAsked)
+                        return;
+
+                    var consent = new ConsentWindow();
+                    consent.ShowDialog();
+                    _settings.TelemetryConsentAsked = true;
+                    _settings.EnableAnonymousReporting = consent.Accepted;
+                    _settings.Save();
+
+                    if (consent.Accepted)
+                        _ = AnonymousReportService.TryAutoReportIfConsentedAsync(_settings, _monitorService.CurrentDevices);
+                }
+                catch
+                {
+                    // Never fail startup over consent dialog
+                }
+            }));
+        }
+    }
+
+    private async Task RunBackgroundStartupTasksAsync()
+    {
+        try
+        {
+            var sync = await RemoteProfileSyncService.SyncIfDueAsync(_settings);
+            if (sync.Updated)
+                await _monitorService.PollNowAsync();
+
+            _latestUpdate = await UpdateCheckService.CheckForUpdateAsync();
+
+            await Task.Delay(2500);
+            if (_settings.EnableAnonymousReporting)
+                await AnonymousReportService.TryAutoReportIfConsentedAsync(_settings, _monitorService.CurrentDevices);
+        }
+        catch
+        {
+            // Background maintenance is strictly non-fatal
+        }
     }
 
     private void ToggleWidgetVisibility()
@@ -87,7 +137,7 @@ public partial class App : System.Windows.Application
             StartupService.SetEnabled(_settings.StartWithWindows);
             _widgetWindow.ApplySettings();
             _monitorService.RestartWithNewInterval();
-        });
+        }, _latestUpdate);
         win.ShowDialog();
     }
 

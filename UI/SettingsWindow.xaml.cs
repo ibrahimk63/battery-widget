@@ -36,22 +36,37 @@ public partial class SettingsWindow : Window
     private readonly AppSettings _settings;
     private readonly BatteryMonitorService _monitorService;
     private readonly Action _onSaved;
+    private readonly UpdateCheckResult? _updateInfo;
     private IReadOnlyList<LearnedCandidate> _currentCandidates = [];
 
-    public SettingsWindow(AppSettings settings, BatteryMonitorService monitorService, Action onSaved)
+    public SettingsWindow(
+        AppSettings settings,
+        BatteryMonitorService monitorService,
+        Action onSaved,
+        UpdateCheckResult? updateInfo = null)
     {
         InitializeComponent();
         _settings = settings;
         _monitorService = monitorService;
         _onSaved = onSaved;
+        _updateInfo = updateInfo;
 
         AlwaysOnTopCheck.IsChecked = _settings.AlwaysOnTop;
         StartWithWindowsCheck.IsChecked = _settings.StartWithWindows;
         LowBatteryNotifCheck.IsChecked = _settings.EnableLowBatteryNotifications;
+        RemoteSyncCheck.IsChecked = _settings.EnableRemoteProfileSync;
+        AnonymousReportCheck.IsChecked = _settings.EnableAnonymousReporting;
         ThresholdSlider.Value = _settings.LowBatteryThreshold;
         IntervalSlider.Value = FindNearestStepIndex(_settings.PollIntervalSeconds);
         OpacitySlider.Value = _settings.Opacity;
 
+        if (_updateInfo is { HasUpdate: true })
+        {
+            UpdateBadgeBtn.Content = $"Yeni Sürüm: v{_updateInfo.LatestVersion} — İndir";
+            UpdateBadgeBtn.Visibility = Visibility.Visible;
+        }
+
+        UpdateSyncStatusText();
         UpdateLabels();
         LoadLearnableDevices();
         LoadDeviceManagementLists();
@@ -157,6 +172,97 @@ public partial class SettingsWindow : Window
         {
             DiagStatusText.Text = $"Tarayıcı açılamadı: {ex.Message}";
         }
+    }
+
+    private void PreviewAnonymousReport_Click(object sender, RoutedEventArgs e)
+    {
+        var payload = AnonymousReportService.BuildPayload(_monitorService.CurrentDevices);
+        HidReportBox.Text = AnonymousReportService.SerializePayloadPretty(payload);
+        DiagStatusText.Text = $"Önizleme hazır: {payload.UnknownHidCandidates.Count} tanınmayan USB HID adayı bulundu (sıfır kişisel veri).";
+    }
+
+    private async void SendAnonymousReport_Click(object sender, RoutedEventArgs e)
+    {
+        SendAnonBtn.IsEnabled = false;
+        DiagStatusText.Text = "Anonim donanım özeti hazırlanıyor...";
+        try
+        {
+            var payload = AnonymousReportService.BuildPayload(_monitorService.CurrentDevices);
+            string jsonPreview = AnonymousReportService.SerializePayloadPretty(payload);
+            HidReportBox.Text = jsonPreview;
+
+            if (payload.UnknownHidCandidates.Count == 0)
+            {
+                DiagStatusText.Text = "Tüm uyumlu USB HID cihazlarınız zaten algılanıyor; gönderilecek eksik cihaz yok.";
+                return;
+            }
+
+            string? endpoint = RemoteProfileSyncService.GetActiveReportEndpointUrl();
+            if (string.IsNullOrWhiteSpace(endpoint))
+            {
+                System.Windows.Clipboard.SetText(jsonPreview);
+                DiagStatusText.Text = "Anonim sunucu henüz yapılandırılmadı; özet panoya kopyalandı, 'Sorun Bildir (GitHub)' ile iletebilirsiniz.";
+                return;
+            }
+
+            var (sent, message) = await AnonymousReportService.SendReportAsync(payload, endpoint);
+            if (sent)
+            {
+                _settings.LastReportedSignature = AnonymousReportService.ComputeSignature(payload);
+                _settings.LastReportSentUtc = DateTimeOffset.UtcNow;
+                _settings.Save();
+            }
+            DiagStatusText.Text = sent ? $"✓ {message}" : message;
+        }
+        catch (Exception ex)
+        {
+            DiagStatusText.Text = $"Gönderim hatası: {ex.Message}";
+        }
+        finally
+        {
+            SendAnonBtn.IsEnabled = true;
+        }
+    }
+
+    private async void SyncProfiles_Click(object sender, RoutedEventArgs e)
+    {
+        SyncProfilesBtn.IsEnabled = false;
+        SyncStatusText.Text = "Güncelleniyor...";
+        try
+        {
+            var result = await RemoteProfileSyncService.SyncIfDueAsync(_settings, force: true);
+            SyncStatusText.Text = $"{result.Message} (Toplam {result.ProfileCount} uzak profil)";
+            if (result.Updated)
+                await _monitorService.PollNowAsync();
+        }
+        catch (Exception ex)
+        {
+            SyncStatusText.Text = $"Hata: {ex.Message}";
+        }
+        finally
+        {
+            SyncProfilesBtn.IsEnabled = true;
+        }
+    }
+
+    private void UpdateSyncStatusText()
+    {
+        int count = RemoteProfileSyncService.LoadCachedOrEmbeddedDatabase().Profiles.Count;
+        SyncStatusText.Text = _settings.LastProfileSyncUtc is { } last
+            ? $"Son kontrol: {last.ToLocalTime():dd.MM HH:mm} • {count} profil"
+            : $"Hazır temel katalog: {count} profil";
+    }
+
+    private void OpenUpdateUrl_Click(object sender, RoutedEventArgs e)
+    {
+        if (_updateInfo is null || string.IsNullOrWhiteSpace(_updateInfo.ReleaseUrl))
+            return;
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(_updateInfo.ReleaseUrl) { UseShellExecute = true });
+        }
+        catch { /* ignore browser open error */ }
     }
 
     private void LoadLearnableDevices()
@@ -354,6 +460,8 @@ public partial class SettingsWindow : Window
         _settings.AlwaysOnTop = AlwaysOnTopCheck.IsChecked == true;
         _settings.StartWithWindows = StartWithWindowsCheck.IsChecked == true;
         _settings.EnableLowBatteryNotifications = LowBatteryNotifCheck.IsChecked == true;
+        _settings.EnableRemoteProfileSync = RemoteSyncCheck.IsChecked == true;
+        _settings.EnableAnonymousReporting = AnonymousReportCheck.IsChecked == true;
         _settings.LowBatteryThreshold = (int)ThresholdSlider.Value;
         _settings.PollIntervalSeconds = IntervalStepsSeconds[idx];
         _settings.Opacity = OpacitySlider.Value;

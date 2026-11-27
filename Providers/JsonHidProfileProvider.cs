@@ -2,17 +2,21 @@ using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using BatteryWidget.Models;
+using BatteryWidget.Services;
 using HidSharp;
 
 namespace BatteryWidget.Providers;
 
 /// <summary>
-/// Loads user-defined and Auto-Learned USB/2.4GHz HID device profiles from both
-/// app-local profiles/*.json and persistent %AppData%\BatteryWidget\profiles/*.json.
+/// Loads USB/2.4GHz HID device profiles in priority order:
+/// 1) User Auto-Learn profiles (%AppData%\BatteryWidget\profiles\*.json)
+/// 2) Remote synced / embedded baseline catalog (profiles-db.json)
+/// 3) App-local profiles\*.json
 /// </summary>
 public sealed class JsonHidProfileProvider : IBatteryProvider
 {
     private readonly string[] _profilesDirectories;
+    private readonly bool _includeRemoteCatalog;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -24,13 +28,20 @@ public sealed class JsonHidProfileProvider : IBatteryProvider
         "BatteryWidget",
         "profiles");
 
-    public string ProviderName => "JSON HID Profilleri";
+    public string ProviderName => "JSON & Uzak HID Profilleri";
 
     public JsonHidProfileProvider(string? profilesDirectory = null)
     {
-        _profilesDirectories = profilesDirectory is not null
-            ? [profilesDirectory]
-            : [Path.Combine(AppContext.BaseDirectory, "profiles"), UserProfilesDirectory];
+        if (profilesDirectory is not null)
+        {
+            _profilesDirectories = [profilesDirectory];
+            _includeRemoteCatalog = false;
+        }
+        else
+        {
+            _profilesDirectories = [UserProfilesDirectory, Path.Combine(AppContext.BaseDirectory, "profiles")];
+            _includeRemoteCatalog = true;
+        }
     }
 
     public IReadOnlyList<HidDeviceProfile> LoadProfiles()
@@ -38,23 +49,25 @@ public sealed class JsonHidProfileProvider : IBatteryProvider
         var list = new List<HidDeviceProfile>();
         var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var dir in _profilesDirectories)
+        void AddProfileIfNew(HidDeviceProfile? profile)
         {
-            if (!Directory.Exists(dir))
-                continue;
+            if (profile is null || string.IsNullOrWhiteSpace(profile.Name))
+                return;
 
-            foreach (var file in Directory.EnumerateFiles(dir, "*.json"))
+            var pids = string.Join(",", profile.ProductIdsHex.OrderBy(p => p, StringComparer.OrdinalIgnoreCase));
+            string key = $"{profile.VendorIdHex}:{pids}:{profile.Name}";
+            if (seenKeys.Add(key))
+                list.Add(profile);
+        }
+
+        // 1) User Auto-Learn profiles take highest priority
+        if (_profilesDirectories.Length > 0 && Directory.Exists(_profilesDirectories[0]))
+        {
+            foreach (var file in Directory.EnumerateFiles(_profilesDirectories[0], "*.json"))
             {
                 try
                 {
-                    var json = File.ReadAllText(file);
-                    var profile = JsonSerializer.Deserialize<HidDeviceProfile>(json, JsonOptions);
-                    if (profile is null || string.IsNullOrWhiteSpace(profile.Name))
-                        continue;
-
-                    string key = $"{profile.VendorIdHex}:{string.Join(",", profile.ProductIdsHex)}:{profile.Name}";
-                    if (seenKeys.Add(key))
-                        list.Add(profile);
+                    AddProfileIfNew(JsonSerializer.Deserialize<HidDeviceProfile>(File.ReadAllText(file), JsonOptions));
                 }
                 catch
                 {
@@ -62,6 +75,34 @@ public sealed class JsonHidProfileProvider : IBatteryProvider
                 }
             }
         }
+
+        // 2) Remote synced or embedded baseline profiles-db.json
+        if (_includeRemoteCatalog)
+        {
+            foreach (var profile in RemoteProfileSyncService.LoadCachedOrEmbeddedDatabase().Profiles)
+                AddProfileIfNew(profile);
+        }
+
+        // 3) Remaining app-local directories
+        for (int i = 1; i < _profilesDirectories.Length; i++)
+        {
+            string dir = _profilesDirectories[i];
+            if (!Directory.Exists(dir))
+                continue;
+
+            foreach (var file in Directory.EnumerateFiles(dir, "*.json"))
+            {
+                try
+                {
+                    AddProfileIfNew(JsonSerializer.Deserialize<HidDeviceProfile>(File.ReadAllText(file), JsonOptions));
+                }
+                catch
+                {
+                    // Skip invalid profile files
+                }
+            }
+        }
+
         return list;
     }
 
@@ -98,6 +139,7 @@ public sealed class JsonHidProfileProvider : IBatteryProvider
             return null;
 
         var query = profile.ParseQueryPacket();
+        var wakeup = profile.ParseWakeupPacket();
 
         foreach (var device in devices)
         {
@@ -108,8 +150,20 @@ public sealed class JsonHidProfileProvider : IBatteryProvider
 
                 using (stream)
                 {
-                    stream.ReadTimeout = 350;
-                    stream.WriteTimeout = 350;
+                    stream.ReadTimeout = 300;
+                    stream.WriteTimeout = 300;
+
+                    if (wakeup is not null && device.GetMaxOutputReportLength() > 0)
+                    {
+                        var wakeBuf = new byte[device.GetMaxOutputReportLength()];
+                        Array.Copy(wakeup, wakeBuf, Math.Min(wakeup.Length, wakeBuf.Length));
+                        try
+                        {
+                            stream.Write(wakeBuf, 0, wakeBuf.Length);
+                            Thread.Sleep(15);
+                        }
+                        catch { /* optional wakeup */ }
+                    }
 
                     if (profile.UseFeatureReport && device.GetMaxFeatureReportLength() > 0)
                     {
@@ -117,7 +171,8 @@ public sealed class JsonHidProfileProvider : IBatteryProvider
                         if (query is not null)
                         {
                             Array.Copy(query, buf, Math.Min(query.Length, buf.Length));
-                            try { stream.SetFeature(buf); } catch { /* some devices only support GetFeature */ }
+                            profile.ApplyChecksum(buf);
+                            try { stream.SetFeature(buf); Thread.Sleep(15); } catch { /* some devices only support GetFeature */ }
                         }
                         else if (profile.ExpectedReportId >= 0)
                         {
@@ -127,7 +182,7 @@ public sealed class JsonHidProfileProvider : IBatteryProvider
                         stream.GetFeature(buf);
                         var parsed = ParseWithProfile(profile, buf);
                         if (parsed.HasValue)
-                            return BuildInfo(profile, vid, device.ProductID, parsed.Value);
+                            return BuildInfo(profile, vid, device.ProductID, parsed.Value, device);
                     }
                     else if (device.GetMaxInputReportLength() > 0)
                     {
@@ -135,6 +190,7 @@ public sealed class JsonHidProfileProvider : IBatteryProvider
                         {
                             var outBuf = new byte[device.GetMaxOutputReportLength()];
                             Array.Copy(query, outBuf, Math.Min(query.Length, outBuf.Length));
+                            profile.ApplyChecksum(outBuf);
                             stream.Write(outBuf, 0, outBuf.Length);
                         }
 
@@ -148,7 +204,7 @@ public sealed class JsonHidProfileProvider : IBatteryProvider
 
                             var parsed = ParseWithProfile(profile, inBuf.AsSpan(0, read));
                             if (parsed.HasValue)
-                                return BuildInfo(profile, vid, device.ProductID, parsed.Value);
+                                return BuildInfo(profile, vid, device.ProductID, parsed.Value, device);
                         }
                     }
                 }
@@ -162,12 +218,26 @@ public sealed class JsonHidProfileProvider : IBatteryProvider
         return null;
     }
 
-    private static DeviceBatteryInfo BuildInfo(HidDeviceProfile profile, int vid, int pid, (int Percent, bool IsCharging) parsed)
+    private static DeviceBatteryInfo BuildInfo(
+        HidDeviceProfile profile,
+        int vid,
+        int pid,
+        (int Percent, bool IsCharging) parsed,
+        HidDevice device)
     {
+        string name = profile.Name;
+        try
+        {
+            string? product = device.GetProductName();
+            if (!string.IsNullOrWhiteSpace(product) && profile.ProductIdsHex.Count == 0)
+                name = product.Trim();
+        }
+        catch { /* use profile name */ }
+
         return new DeviceBatteryInfo
         {
             Id = $"profile-{vid:X4}-{pid:X4}",
-            Name = profile.Name,
+            Name = name,
             Category = profile.Category,
             Connection = ConnectionKind.Wireless24Ghz,
             BatteryPercent = parsed.Percent,
@@ -189,12 +259,27 @@ public sealed class JsonHidProfileProvider : IBatteryProvider
         int max = Math.Max(1, profile.MaxBatteryValue);
         int percent = Math.Clamp((int)Math.Round(raw * 100.0 / max), 0, 100);
 
+        if (raw == 0 &&
+            profile.VoltageHighByteIndex.HasValue &&
+            profile.VoltageLowByteIndex.HasValue &&
+            profile.VoltageHighByteIndex.Value >= 0 &&
+            profile.VoltageLowByteIndex.Value >= 0 &&
+            profile.VoltageHighByteIndex.Value < data.Length &&
+            profile.VoltageLowByteIndex.Value < data.Length)
+        {
+            int mv = (data[profile.VoltageHighByteIndex.Value] << 8) | data[profile.VoltageLowByteIndex.Value];
+            if (mv is >= 3200 and <= 4350)
+                percent = Math.Clamp((int)Math.Round((mv - 3300) * 100.0 / 900.0), 1, 100);
+        }
+
         bool isCharging = false;
         if (profile.ChargingByteIndex.HasValue &&
             profile.ChargingByteIndex.Value >= 0 &&
             profile.ChargingByteIndex.Value < data.Length)
         {
-            isCharging = (data[profile.ChargingByteIndex.Value] & profile.ChargingMask) != 0;
+            isCharging = profile.ChargingEqualsValue.HasValue
+                ? data[profile.ChargingByteIndex.Value] == profile.ChargingEqualsValue.Value
+                : (data[profile.ChargingByteIndex.Value] & profile.ChargingMask) != 0;
         }
 
         return (percent, isCharging);

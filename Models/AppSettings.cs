@@ -21,6 +21,15 @@ public sealed class AppSettings
     public bool StartWithWindows { get; set; } = false;
     public List<HiddenDeviceEntry> HiddenDevices { get; set; } = [];
 
+    public bool EnableRemoteProfileSync { get; set; } = true;
+    public DateTimeOffset? LastProfileSyncUtc { get; set; }
+    public string? RemoteProfileEtag { get; set; }
+
+    public bool TelemetryConsentAsked { get; set; } = false;
+    public bool EnableAnonymousReporting { get; set; } = false;
+    public string? LastReportedSignature { get; set; }
+    public DateTimeOffset? LastReportSentUtc { get; set; }
+
     private static readonly string SettingsDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "BatteryWidget");

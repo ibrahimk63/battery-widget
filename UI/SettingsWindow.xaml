@@ -330,13 +330,27 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <StackPanel Grid.Row="0" Margin="2,0,2,12">
-            <TextBlock Text="Ayarlar" FontSize="18" FontWeight="SemiBold" Foreground="#F9FAFB" />
-            <TextBlock Text="Pil göstergesinin görünümünü, cihazlarınızı ve sorun giderme araçlarını buradan kolayca yönetebilirsiniz."
-                       Style="{StaticResource SubHintText}"
-                       FontSize="12"
-                       Margin="0,3,0,0" />
-        </StackPanel>
+        <Grid Grid.Row="0" Margin="2,0,2,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel>
+                <TextBlock Text="Ayarlar" FontSize="18" FontWeight="SemiBold" Foreground="#F9FAFB" />
+                <TextBlock Text="Pil göstergesinin görünümünü, cihazlarınızı ve sorun giderme araçlarını buradan kolayca yönetebilirsiniz."
+                           Style="{StaticResource SubHintText}"
+                           FontSize="12"
+                           Margin="0,3,0,0" />
+            </StackPanel>
+            <Button x:Name="UpdateBadgeBtn"
+                    Grid.Column="1"
+                    Visibility="Collapsed"
+                    Style="{StaticResource AccentButton}"
+                    Click="OpenUpdateUrl_Click"
+                    Padding="12,6"
+                    VerticalAlignment="Center"
+                    Content="Yeni Sürüm Mevcut" />
+        </Grid>
 
         <TabControl Grid.Row="1" Background="#181C26" BorderBrush="#262C3D" BorderThickness="1" Padding="14">
             <TabItem Header="Genel Ayarlar">
@@ -372,7 +386,7 @@
                             </StackPanel>
                         </Border>
 
-                        <Border Style="{StaticResource SectionCard}" Margin="0">
+                        <Border Style="{StaticResource SectionCard}">
                             <StackPanel>
                                 <TextBlock Text="Pil Bildirimleri ve Performans" Style="{StaticResource SectionTitleText}" />
 
@@ -408,6 +422,35 @@
                                 <TextBlock Text="Cihazların şarjının ne sıklıkla kontrol edileceğini seçin. Daha uzun süre daha az işlemci kullanır (Önerilen: 1 dk)."
                                            Style="{StaticResource SubHintText}"
                                            Margin="0,2,0,0" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource SectionCard}" Margin="0">
+                            <StackPanel>
+                                <TextBlock Text="Güncellemeler ve Topluluk Desteği" Style="{StaticResource SectionTitleText}" />
+
+                                <CheckBox x:Name="RemoteSyncCheck" Content="Cihaz veritabanını otomatik güncelle (Önerilen)" />
+                                <TextBlock Text="Yeni çıkan cihaz profilleri, siz yeni .exe indirmeden günde 1 kez otomatik indirilir."
+                                           Style="{StaticResource SubHintText}"
+                                           Margin="22,2,0,10" />
+
+                                <StackPanel Orientation="Horizontal" Margin="22,0,0,14">
+                                    <Button x:Name="SyncProfilesBtn"
+                                            Content="Veritabanını Şimdi Güncelle"
+                                            Style="{StaticResource DarkButton}"
+                                            Padding="12,5"
+                                            Click="SyncProfiles_Click"
+                                            Margin="0,0,10,0" />
+                                    <TextBlock x:Name="SyncStatusText"
+                                               Foreground="#9CA3AF"
+                                               FontSize="11.5"
+                                               VerticalAlignment="Center" />
+                                </StackPanel>
+
+                                <CheckBox x:Name="AnonymousReportCheck" Content="Desteklenmeyen cihazları anonim olarak bildir (İsteğe Bağlı)" />
+                                <TextBlock Text="Yalnızca tanınmayan USB alıcıların VID:PID kimliğini gönderir. Kişisel bilgi, kullanıcı adı veya IP kesinlikle gönderilmez."
+                                           Style="{StaticResource SubHintText}"
+                                           Margin="22,2,0,0" />
                             </StackPanel>
                         </Border>
                     </StackPanel>
@@ -652,7 +695,7 @@
                                        Foreground="#93C5FD"
                                        FontSize="12.5"
                                        FontWeight="SemiBold" />
-                            <TextBlock Text="1) 'Tüm Cihazları Tara'ya basın.  2) 'Sorun Bildir (GitHub)' tuşuna basın — rapor otomatik panoya kopyalanır ve destek sayfamız açılır; açılan kutuya Ctrl+V ile yapıştırıp göndermeniz yeterli."
+                            <TextBlock Text="Önce 'Tüm Cihazları Tara'ya basın; ardından hesap açmadan 'Tek Tıkla Anonim Bildir'i kullanabilir veya 'Sorun Bildir (GitHub)' ile destek sayfasına yapıştırabilirsiniz."
                                        Foreground="#CBD5E1"
                                        FontSize="11.5"
                                        TextWrapping="Wrap"
@@ -661,43 +704,56 @@
                     </Border>
 
                     <Grid Grid.Row="1" Margin="0,0,0,8">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="8" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="8" />
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="8" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
 
                         <Button x:Name="UniversalScanBtn"
-                                Grid.Column="0"
+                                Grid.Row="0" Grid.Column="0"
                                 Style="{StaticResource ActionCardButton}"
                                 Click="UniversalScan_Click">
                             <StackPanel>
                                 <TextBlock Text="1. Tüm Cihazları Tara" FontWeight="SemiBold" FontSize="12.5" Foreground="#F9FAFB" />
-                                <TextBlock Text="Bluetooth, USB ve kablosuz aygıtların raporunu çıkarır" FontSize="11" Foreground="#9CA3AF" TextWrapping="Wrap" Margin="0,2,0,0" />
+                                <TextBlock Text="Bluetooth, USB ve kablosuz aygıtların teknik raporunu çıkarır" FontSize="11" Foreground="#9CA3AF" TextWrapping="Wrap" Margin="0,2,0,0" />
+                            </StackPanel>
+                        </Button>
+
+                        <Button x:Name="SendAnonBtn"
+                                Grid.Row="0" Grid.Column="2"
+                                Style="{StaticResource ActionCardButton}"
+                                Background="#132A1E"
+                                BorderBrush="#22C55E"
+                                Click="SendAnonymousReport_Click">
+                            <StackPanel>
+                                <TextBlock Text="2. Tek Tıkla Anonim Bildir (Hesapsız)" FontWeight="SemiBold" FontSize="12.5" Foreground="#4ADE80" />
+                                <TextBlock Text="GitHub hesabı olmadan yalnızca desteklenmeyen VID:PID bilgisini yollar" FontSize="11" Foreground="#A7F3D0" TextWrapping="Wrap" Margin="0,2,0,0" />
                             </StackPanel>
                         </Button>
 
                         <Button x:Name="ReportIssueBtn"
-                                Grid.Column="2"
+                                Grid.Row="2" Grid.Column="0"
                                 Style="{StaticResource ActionCardButton}"
-                                Background="#132A1E"
-                                BorderBrush="#22C55E"
                                 Click="ReportIssue_Click">
                             <StackPanel>
-                                <TextBlock Text="2. Sorun Bildir (GitHub)" FontWeight="SemiBold" FontSize="12.5" Foreground="#4ADE80" />
-                                <TextBlock Text="Raporu kopyalar ve destek sayfasını açar (Ctrl+V yapın)" FontSize="11" Foreground="#A7F3D0" TextWrapping="Wrap" Margin="0,2,0,0" />
+                                <TextBlock Text="Sorun Bildir (GitHub Sayfası)" FontWeight="SemiBold" FontSize="12.5" Foreground="#F9FAFB" />
+                                <TextBlock Text="Raporu kopyalar ve destek formunu açar (Ctrl+V yapın)" FontSize="11" Foreground="#9CA3AF" TextWrapping="Wrap" Margin="0,2,0,0" />
                             </StackPanel>
                         </Button>
 
                         <Button x:Name="CopyReportBtn"
-                                Grid.Column="4"
+                                Grid.Row="2" Grid.Column="2"
                                 Style="{StaticResource ActionCardButton}"
                                 Click="CopyHid_Click">
                             <StackPanel>
-                                <TextBlock Text="Sadece Raporu Kopyala" FontWeight="SemiBold" FontSize="12.5" Foreground="#F9FAFB" />
-                                <TextBlock Text="Panoya kopyalar (Discord veya mesajla göndermek için)" FontSize="11" Foreground="#9CA3AF" TextWrapping="Wrap" Margin="0,2,0,0" />
+                                <TextBlock Text="Raporu Panoya Kopyala" FontWeight="SemiBold" FontSize="12.5" Foreground="#F9FAFB" />
+                                <TextBlock Text="Discord veya mesajla göndermek için raporu kopyalar" FontSize="11" Foreground="#9CA3AF" TextWrapping="Wrap" Margin="0,2,0,0" />
                             </StackPanel>
                         </Button>
                     </Grid>
@@ -705,6 +761,7 @@
                     <Grid Grid.Row="2" Margin="0,0,0,6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <TextBlock x:Name="DiagStatusText"
@@ -715,14 +772,23 @@
                                    VerticalAlignment="Center"
                                    TextWrapping="Wrap"
                                    Margin="2,0,10,0" />
-                        <Button x:Name="ScanHidBtn"
+                        <Button x:Name="PreviewAnonBtn"
                                 Grid.Column="1"
-                                Content="Gelişmiş: Ham USB / HID Listesi"
+                                Content="Anonim Veriyi Önizle"
+                                Style="{StaticResource DarkButton}"
+                                Padding="10,4"
+                                FontSize="11.5"
+                                Click="PreviewAnonymousReport_Click"
+                                Margin="0,0,6,0"
+                                ToolTip="Gönderilecek tamamen anonim JSON özetini aşağıda gösterir" />
+                        <Button x:Name="ScanHidBtn"
+                                Grid.Column="2"
+                                Content="Ham USB / HID Listesi"
                                 Style="{StaticResource DarkButton}"
                                 Padding="10,4"
                                 FontSize="11.5"
                                 Click="ScanHid_Click"
-                                ToolTip="Sadece ham USB donanım kimliklerini listeler" />
+                                ToolTip="Gelişmiş: Sadece ham USB donanım kimliklerini listeler" />
                     </Grid>
 
                     <TextBox x:Name="HidReportBox"
