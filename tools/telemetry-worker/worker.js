@@ -45,7 +45,8 @@ export default {
 
       const webhookUrl = typeof env.DISCORD_WEBHOOK_URL === "string" ? env.DISCORD_WEBHOOK_URL.trim() : "";
       if (!webhookUrl) {
-        return new Response(JSON.stringify({ ok: false, error: "webhook_not_configured" }), {
+        const envKeys = env && typeof env === "object" ? Object.keys(env).sort() : [];
+        return new Response(JSON.stringify({ ok: false, error: "webhook_not_configured", envKeys }), {
           status: 503,
           headers: { "content-type": "application/json" }
         });

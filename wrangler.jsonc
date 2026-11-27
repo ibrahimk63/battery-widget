@@ -1,5 +1,6 @@
 {
   "name": "battery-widget",
   "main": "tools/telemetry-worker/worker.js",
-  "compatibility_date": "2026-11-01"
+  "compatibility_date": "2026-11-01",
+  "keep_vars": true
 }
