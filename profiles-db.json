@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-27T00:00:00Z",
-  "reportEndpointUrl": "",
+  "updatedAt": "2026-11-27T16:05:00Z",
+  "reportEndpointUrl": "https://battery-widget.ibrqhimklc.workers.dev",
   "profiles": [
     {
       "name": "Attack Shark R5 Ultra",
