@@ -1,0 +1,227 @@
+name: Self-Healing Device Profiles
+
+on:
+  repository_dispatch:
+    types: [unknown_device_report]
+  workflow_dispatch:
+    inputs:
+      vid:
+        description: "Vendor ID hex (e.g. 0x3554)"
+        required: true
+        default: "0x9999"
+      pid:
+        description: "Product ID hex (e.g. 0xFA12)"
+        required: true
+        default: "0x1234"
+      product_name:
+        description: "USB Product Name"
+        required: true
+        default: "Test Wireless Device"
+      max_in:
+        description: "Max Input Report Length"
+        required: false
+        default: "64"
+      max_out:
+        description: "Max Output Report Length"
+        required: false
+        default: "64"
+      max_feat:
+        description: "Max Feature Report Length"
+        required: false
+        default: "0"
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: self-healing-profiles
+  cancel-in-progress: false
+
+jobs:
+  resolve-devices:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Write dispatch payload
+        shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_PAYLOAD: ${{ toJson(github.event.client_payload) }}
+          INPUT_VID: ${{ github.event.inputs.vid }}
+          INPUT_PID: ${{ github.event.inputs.pid }}
+          INPUT_NAME: ${{ github.event.inputs.product_name }}
+          INPUT_IN: ${{ github.event.inputs.max_in }}
+          INPUT_OUT: ${{ github.event.inputs.max_out }}
+          INPUT_FEAT: ${{ github.event.inputs.max_feat }}
+        run: |
+          $payloadPath = Join-Path $env:RUNNER_TEMP "dispatch-payload.json"
+          if ($env:EVENT_NAME -eq "repository_dispatch") {
+            Set-Content -LiteralPath $payloadPath -Value $env:DISPATCH_PAYLOAD -Encoding UTF8
+          } else {
+            $manual = @{
+              appVersion = "manual"
+              detectedCount = 0
+              candidates = @(
+                @{
+                  vid = $env:INPUT_VID
+                  pid = $env:INPUT_PID
+                  productName = $env:INPUT_NAME
+                  maxIn = [int]$env:INPUT_IN
+                  maxOut = [int]$env:INPUT_OUT
+                  maxFeat = [int]$env:INPUT_FEAT
+                }
+              )
+            } | ConvertTo-Json -Depth 4
+            Set-Content -LiteralPath $payloadPath -Value $manual -Encoding UTF8
+          }
+
+      - name: Run device profile self-healing resolver
+        id: resolve
+        shell: pwsh
+        run: |
+          $payloadPath = Join-Path $env:RUNNER_TEMP "dispatch-payload.json"
+          $outPath = Join-Path $env:RUNNER_TEMP "resolve-result.json"
+          node tools/self-healing/resolve_device.mjs --db profiles-db.json --payload-file $payloadPath --out $outPath
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $res = Get-Content -LiteralPath $outPath -Raw | ConvertFrom-Json
+          "db_updated=$($res.dbUpdated.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "resolved_count=$($res.resolved.Count)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "unresolved_count=$($res.unresolved.Count)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Setup .NET 10
+        if: steps.resolve.outputs.db_updated == 'true'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+          dotnet-quality: "ga"
+
+      - name: Validate updated profiles-db.json with dotnet test
+        if: steps.resolve.outputs.db_updated == 'true'
+        shell: pwsh
+        run: |
+          dotnet test tests/BatteryWidget.Tests/BatteryWidget.Tests.csproj --verbosity normal
+
+      - name: Auto-commit and push verified profiles
+        if: steps.resolve.outputs.db_updated == 'true'
+        shell: pwsh
+        run: |
+          git config user.name "battery-widget-bot[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add profiles-db.json
+          git commit -m "auto(profiles): add ${{ steps.resolve.outputs.resolved_count }} verified device profile(s)"
+          git pull --rebase origin main
+          git push origin main
+
+      - name: Notify Discord on auto-merged profile
+        if: steps.resolve.outputs.db_updated == 'true' && secrets.DISCORD_WEBHOOK_URL != ''
+        shell: pwsh
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          $outPath = Join-Path $env:RUNNER_TEMP "resolve-result.json"
+          $res = Get-Content -LiteralPath $outPath -Raw | ConvertFrom-Json
+          $lines = $res.resolved | ForEach-Object { "• **$($_.profile.name)** (\`$($_.vid):$($_.pid)\`) — Aile: $($_.family)" }
+          $body = @{
+            embeds = @(
+              @{
+                title = "BatteryWidget — Otomatik Cihaz Tanıma (Auto-Healed)"
+                color = 2278750
+                description = ($lines -join "`n") + "`n`nTüm testler geçti ve `profiles-db.json` güncellendi. Kullanıcılar 24 saat içinde otomatik alacak."
+              }
+            )
+          } | ConvertTo-Json -Depth 5
+          Invoke-RestMethod -Uri $env:DISCORD_WEBHOOK_URL -Method Post -ContentType "application/json" -Body $body | Out-Null
+
+      - name: Create or update GitHub Issues for unresolved devices
+        if: steps.resolve.outputs.unresolved_count != '0'
+        uses: actions/github-script@v7
+        env:
+          OUT_FILE: ${{ runner.temp }}/resolve-result.json
+        with:
+          script: |
+            const fs = require('fs');
+            const result = JSON.parse(fs.readFileSync(process.env.OUT_FILE, 'utf8'));
+            const { owner, repo } = context.repo;
+
+            try {
+              await github.rest.issues.createLabel({
+                owner,
+                repo,
+                name: 'unknown-device',
+                color: 'd97706',
+                description: 'Anonim telemetriden otomatik bildirilen henüz tanınmayan cihazlar'
+              });
+            } catch (_) {
+              // Label already exists
+            }
+
+            const openIssues = await github.paginate(github.rest.issues.listForRepo, {
+              owner,
+              repo,
+              state: 'open',
+              labels: 'unknown-device',
+              per_page: 100
+            });
+
+            for (const item of result.unresolved) {
+              const marker = `(${item.vid}:${item.pid})`;
+              const existing = openIssues.find((iss) =>
+                iss.title.toLowerCase().includes(marker.toLowerCase())
+              );
+
+              if (existing) {
+                const countMatch = existing.body?.match(/Bildirim Sayısı:\*\*\s*(\d+)/i);
+                const nextCount = countMatch ? Number(countMatch[1]) + 1 : 2;
+                const updatedBody = (existing.body || '').includes('Bildirim Sayısı:**')
+                  ? existing.body.replace(/Bildirim Sayısı:\*\*\s*\d+/i, `Bildirim Sayısı:** ${nextCount}`)
+                  : `${existing.body}\n\n**Bildirim Sayısı:** ${nextCount}`;
+
+                await github.rest.issues.update({
+                  owner,
+                  repo,
+                  issue_number: existing.number,
+                  body: updatedBody
+                });
+                continue;
+              }
+
+              const vendorLine = item.usbVendorName ? `${item.usbVendorName}` : 'Bilinmiyor (usb.ids eşleşmedi)';
+              const deviceLine = item.usbDeviceName ? `${item.usbDeviceName}` : 'Bilinmiyor (usb.ids eşleşmedi)';
+
+              const body = [
+                '## Anonim Cihaz Raporu',
+                '',
+                `- **Ürün Adı:** ${item.productName}`,
+                `- **VID:PID:** \`${item.vid}:${item.pid}\``,
+                `- **HID Rapor Boyutları:** \`In:${item.maxIn} Out:${item.maxOut} Feat:${item.maxFeat}\``,
+                `- **USB IDs Üretici:** ${vendorLine}`,
+                `- **USB IDs Model:** ${deviceLine}`,
+                `- **Bildirim Sayısı:** 1`,
+                '',
+                '### Hızlı Araştırma Bağlantıları (Açık Kaynak)',
+                `- [DeviceHunt (${item.vid}:${item.pid})](${item.researchLinks.usbIdsDeviceHunt})`,
+                `- [libratbag Kod Taraması](${item.researchLinks.libratbagSearch})`,
+                `- [HeadsetControl Kod Taraması](${item.researchLinks.headsetControlSearch})`,
+                `- [GitHub Genel Kod Taraması](${item.researchLinks.githubCodeSearch})`,
+                '',
+                '> Bilinen güvenli bir protokol ailesine ait olmadığı için donanım güvenliği amacıyla otomatik eklenmedi.'
+              ].join('\n');
+
+              await github.rest.issues.create({
+                owner,
+                repo,
+                title: `[Unknown Device] ${item.productName} ${marker}`,
+                body,
+                labels: ['unknown-device']
+              });
+            }
