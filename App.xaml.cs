@@ -28,8 +28,10 @@ public partial class App : System.Windows.Application
         {
             new HyperXCloud3Provider(),
             new DarmosharkM3V2Provider(),
-            new JsonHidProfileProvider(),
-            new BluetoothBatteryProvider()
+            new GamepadBatteryProvider(),
+            new BluetoothBatteryProvider(),
+            new GenericHidBatteryProvider(),
+            new JsonHidProfileProvider()
         };
 
         _monitorService = new BatteryMonitorService(providers, notificationService, _settings);

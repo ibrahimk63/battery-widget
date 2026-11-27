@@ -23,6 +23,8 @@ public sealed record DeviceBatteryInfo
     public DeviceCategory Category { get; init; } = DeviceCategory.Other;
     public ConnectionKind Connection { get; init; } = ConnectionKind.Wireless24Ghz;
     public int BatteryPercent { get; init; } = -1;
+    public string? DisplayLevelText { get; init; }
+    public int? VisualFillPercent { get; init; }
     public bool IsCharging { get; init; }
     public bool IsConnected { get; init; } = true;
     public DateTimeOffset LastUpdated { get; init; } = DateTimeOffset.Now;
@@ -45,5 +47,10 @@ public sealed record DeviceBatteryInfo
         _ => ""
     };
 
-    public string PercentText => BatteryPercent >= 0 ? $"{BatteryPercent}%" : "--";
+    public string PercentText =>
+        !string.IsNullOrEmpty(DisplayLevelText) ? DisplayLevelText :
+        BatteryPercent >= 0 ? $"{BatteryPercent}%" : "--";
+
+    public int EffectiveRingPercent =>
+        BatteryPercent >= 0 ? BatteryPercent : (VisualFillPercent ?? -1);
 }

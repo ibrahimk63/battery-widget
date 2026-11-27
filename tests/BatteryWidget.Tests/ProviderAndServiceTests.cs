@@ -26,7 +26,6 @@ public class ProviderAndServiceTests
     [Fact]
     public void Darmoshark_ParseBatteryResponse_ParsesRealtekB6BaseInfoAndLiveEvent()
     {
-        // Realtek 64-byte Base Info: Report ID 0xB6, cmd 0x05, byte[20] = 0x36 (54%, not charging)
         var baseInfo = new byte[64];
         baseInfo[0] = 0xB6;
         baseInfo[1] = 0x05;
@@ -36,14 +35,12 @@ public class ProviderAndServiceTests
         Assert.Equal(54, res1.Value.Percent);
         Assert.False(res1.Value.IsCharging);
 
-        // With bit 7 set -> charging
         baseInfo[20] = 0x80 | 54;
         var resCharging = DarmosharkM3V2Provider.ParseBatteryResponse(baseInfo);
         Assert.NotNull(resCharging);
         Assert.Equal(54, resCharging.Value.Percent);
         Assert.True(resCharging.Value.IsCharging);
 
-        // Live event 0xE2: byte[4] = charging, byte[5] = percent
         var liveEvt = new byte[64];
         liveEvt[0] = 0xB6;
         liveEvt[1] = 0xE2;
@@ -91,19 +88,105 @@ public class ProviderAndServiceTests
             IsConnected = true
         };
 
-        // First poll -> should notify
         service.Evaluate([lowDevice], settings);
         Assert.Equal(1, notifications);
 
-        // Second poll at same level -> should NOT spam
         service.Evaluate([lowDevice], settings);
         Assert.Equal(1, notifications);
 
-        // Device plugged in to charge -> resets alert state
         service.Evaluate([lowDevice with { IsCharging = true }], settings);
 
-        // Drops again -> should notify again
         service.Evaluate([lowDevice], settings);
         Assert.Equal(2, notifications);
+    }
+
+    [Fact]
+    public void NotificationService_TriggersOnQualitativeLowLevel()
+    {
+        int notifications = 0;
+        var service = new NotificationService((_, _) => notifications++);
+        var settings = new AppSettings { EnableLowBatteryNotifications = true, LowBatteryThreshold = 15 };
+
+        var xboxPad = new DeviceBatteryInfo
+        {
+            Id = "xbox-pad-0",
+            Name = "Xbox Controller",
+            BatteryPercent = -1,
+            DisplayLevelText = "Düşük",
+            VisualFillPercent = 25,
+            IsConnected = true
+        };
+
+        service.Evaluate([xboxPad], settings);
+        Assert.Equal(1, notifications);
+
+        service.Evaluate([xboxPad], settings);
+        Assert.Equal(1, notifications);
+
+        service.Evaluate([xboxPad with { DisplayLevelText = "Dolu", VisualFillPercent = 100 }], settings);
+        service.Evaluate([xboxPad], settings);
+        Assert.Equal(2, notifications);
+    }
+
+    [Fact]
+    public void Gamepad_MapXInputBattery_MapsQualitativeLevelsWithoutFakePercent()
+    {
+        Assert.Equal(("Dolu", 100, false), GamepadBatteryProvider.MapXInputBattery(
+            GamepadBatteryProvider.BATTERY_TYPE_ALKALINE, GamepadBatteryProvider.BATTERY_LEVEL_FULL));
+        Assert.Equal(("Orta", 65, false), GamepadBatteryProvider.MapXInputBattery(
+            GamepadBatteryProvider.BATTERY_TYPE_NIMH, GamepadBatteryProvider.BATTERY_LEVEL_MEDIUM));
+        Assert.Equal(("Düşük", 25, false), GamepadBatteryProvider.MapXInputBattery(
+            GamepadBatteryProvider.BATTERY_TYPE_ALKALINE, GamepadBatteryProvider.BATTERY_LEVEL_LOW));
+        Assert.Equal(("Boş", 8, false), GamepadBatteryProvider.MapXInputBattery(
+            GamepadBatteryProvider.BATTERY_TYPE_ALKALINE, GamepadBatteryProvider.BATTERY_LEVEL_EMPTY));
+        Assert.Equal(("Kablolu", 100, true), GamepadBatteryProvider.MapXInputBattery(
+            GamepadBatteryProvider.BATTERY_TYPE_WIRED, GamepadBatteryProvider.BATTERY_LEVEL_FULL));
+        Assert.Null(GamepadBatteryProvider.MapXInputBattery(
+            GamepadBatteryProvider.BATTERY_TYPE_DISCONNECTED, 0));
+    }
+
+    [Fact]
+    public void Gamepad_ParseDualSenseAndDualShock4_ParsesPercentAndCharging()
+    {
+        var dsUsb = new byte[64];
+        dsUsb[0] = 0x01;
+        dsUsb[53] = 0x15; // status=1 (charging), level=5 -> 60%
+        var resDs = GamepadBatteryProvider.ParseDualSenseReport(dsUsb);
+        Assert.NotNull(resDs);
+        Assert.Equal(60, resDs.Value.Percent);
+        Assert.True(resDs.Value.IsCharging);
+        Assert.False(resDs.Value.IsBluetooth);
+
+        var ds4Bt = new byte[64];
+        ds4Bt[0] = 0x11;
+        ds4Bt[32] = 0x07; // cable=0, level=7 -> 80%
+        var resDs4 = GamepadBatteryProvider.ParseDualShock4Report(ds4Bt);
+        Assert.NotNull(resDs4);
+        Assert.Equal(80, resDs4.Value.Percent);
+        Assert.False(resDs4.Value.IsCharging);
+        Assert.True(resDs4.Value.IsBluetooth);
+    }
+
+    [Fact]
+    public void DeviceBatteryInfo_UsesDisplayLevelTextAndEffectiveRingPercent()
+    {
+        var dev = new DeviceBatteryInfo
+        {
+            Id = "xbox-pad-0",
+            Name = "Xbox Controller",
+            BatteryPercent = -1,
+            DisplayLevelText = "Orta",
+            VisualFillPercent = 65
+        };
+
+        Assert.Equal("Orta", dev.PercentText);
+        Assert.Equal(65, dev.EffectiveRingPercent);
+    }
+
+    [Fact]
+    public void Bluetooth_NormalizeBluetoothName_StripsAudioProfileSuffixes()
+    {
+        Assert.Equal("JBL Tune 760NC", BluetoothBatteryProvider.NormalizeBluetoothName("JBL Tune 760NC Hands-Free AG Audio"));
+        Assert.Equal("AirPods Pro", BluetoothBatteryProvider.NormalizeBluetoothName("AirPods Pro Stereo"));
     }
 }

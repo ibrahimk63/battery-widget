@@ -8,7 +8,8 @@ public sealed class BatteryMonitorService : IDisposable
     private readonly IReadOnlyList<IBatteryProvider> _providers;
     private readonly NotificationService _notificationService;
     private readonly AppSettings _settings;
-    private readonly Dictionary<string, int> _lastKnownPercents = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, (int Percent, string? DisplayLevel, int? VisualFill)> _lastKnownStates =
+        new(StringComparer.OrdinalIgnoreCase);
     private PeriodicTimer? _timer;
     private CancellationTokenSource? _cts;
     private readonly SemaphoreSlim _pollLock = new(1, 1);
@@ -30,7 +31,7 @@ public sealed class BatteryMonitorService : IDisposable
     {
         Stop();
         _cts = new CancellationTokenSource();
-        var interval = TimeSpan.FromSeconds(Math.Clamp(_settings.PollIntervalSeconds, 5, 600));
+        var interval = TimeSpan.FromSeconds(Math.Clamp(_settings.PollIntervalSeconds, 10, 300));
         _timer = new PeriodicTimer(interval);
         _ = RunLoopAsync(_cts.Token);
     }
@@ -92,8 +93,8 @@ public sealed class BatteryMonitorService : IDisposable
             var merged = results
                 .SelectMany(x => x)
                 .GroupBy(d => d.Id, StringComparer.OrdinalIgnoreCase)
-                .Select(g => g.OrderByDescending(x => x.IsConnected).ThenByDescending(x => x.BatteryPercent).First())
-                .Select(ApplyLastKnownPercent)
+                .Select(g => g.OrderByDescending(x => x.IsConnected).ThenByDescending(x => x.EffectiveRingPercent).First())
+                .Select(ApplyLastKnownState)
                 .OrderByDescending(d => d.IsConnected)
                 .ThenBy(d => d.Name)
                 .ToList();
@@ -109,17 +110,24 @@ public sealed class BatteryMonitorService : IDisposable
         }
     }
 
-    private DeviceBatteryInfo ApplyLastKnownPercent(DeviceBatteryInfo device)
+    private DeviceBatteryInfo ApplyLastKnownState(DeviceBatteryInfo device)
     {
-        if (device.IsConnected && device.BatteryPercent >= 0)
+        if (device.IsConnected && (device.BatteryPercent >= 0 || !string.IsNullOrEmpty(device.DisplayLevelText)))
         {
-            _lastKnownPercents[device.Id] = device.BatteryPercent;
+            _lastKnownStates[device.Id] = (device.BatteryPercent, device.DisplayLevelText, device.VisualFillPercent);
             return device;
         }
 
-        if (!device.IsConnected && device.BatteryPercent < 0 && _lastKnownPercents.TryGetValue(device.Id, out int cached))
+        if (!device.IsConnected && device.BatteryPercent < 0 && string.IsNullOrEmpty(device.DisplayLevelText) &&
+            _lastKnownStates.TryGetValue(device.Id, out var cached))
         {
-            return device with { BatteryPercent = cached, StatusNote = "Uyku" };
+            return device with
+            {
+                BatteryPercent = cached.Percent,
+                DisplayLevelText = cached.DisplayLevel,
+                VisualFillPercent = cached.VisualFill,
+                StatusNote = "Uyku"
+            };
         }
 
         return device;

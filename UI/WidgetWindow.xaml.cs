@@ -1,3 +1,4 @@
+using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -16,11 +17,17 @@ namespace BatteryWidget.UI;
 
 public partial class WidgetWindow : Window
 {
+    private const int PageSize = 2;
+
     private readonly AppSettings _settings;
     private readonly BatteryMonitorService _monitorService;
     private readonly Action _onOpenSettings;
     private readonly Action _onExit;
     private bool _isInitializing = true;
+
+    private IReadOnlyList<DeviceBatteryInfo> _allDevices = [];
+    private int _currentPage;
+    private string _lastRenderedSignature = string.Empty;
 
     public WidgetWindow(
         AppSettings settings,
@@ -49,8 +56,8 @@ public partial class WidgetWindow : Window
         else
         {
             var workArea = SystemParameters.WorkArea;
-            Left = workArea.Right - 320;
-            Top = workArea.Bottom - 220;
+            Left = workArea.Right - 336;
+            Top = workArea.Bottom - 230;
         }
     }
 
@@ -63,21 +70,108 @@ public partial class WidgetWindow : Window
 
     public void UpdateDevices(IReadOnlyList<DeviceBatteryInfo> devices)
     {
-        DevicesPanel.Children.Clear();
+        _allDevices = devices;
+        int totalPages = Math.Max(1, (int)Math.Ceiling(_allDevices.Count / (double)PageSize));
+        if (_currentPage >= totalPages)
+            _currentPage = totalPages - 1;
 
-        if (devices.Count == 0)
+        RenderCurrentPage();
+    }
+
+    private void RenderCurrentPage(bool force = false)
+    {
+        if (_allDevices.Count == 0)
         {
-            EmptyStateText.Text = "Bağlı cihaz bulunamadı";
-            EmptyStateText.Visibility = Visibility.Visible;
+            if (_lastRenderedSignature != "EMPTY" || force)
+            {
+                DevicesPanel.Children.Clear();
+                PaginationPanel.Children.Clear();
+                PaginationPanel.Visibility = Visibility.Collapsed;
+                EmptyStateText.Text = "Bağlı cihaz bulunamadı";
+                EmptyStateText.Visibility = Visibility.Visible;
+                _lastRenderedSignature = "EMPTY";
+            }
             return;
         }
 
-        EmptyStateText.Visibility = Visibility.Collapsed;
+        int totalPages = Math.Max(1, (int)Math.Ceiling(_allDevices.Count / (double)PageSize));
+        _currentPage = Math.Clamp(_currentPage, 0, totalPages - 1);
 
-        foreach (var device in devices)
+        var pageDevices = _allDevices
+            .Skip(_currentPage * PageSize)
+            .Take(PageSize)
+            .ToList();
+
+        var sigBuilder = new StringBuilder();
+        sigBuilder.Append(_currentPage).Append('/').Append(totalPages).Append('|');
+        foreach (var d in pageDevices)
+        {
+            sigBuilder.Append(d.Id).Append(':')
+                      .Append(d.Name).Append(':')
+                      .Append(d.PercentText).Append(':')
+                      .Append(d.EffectiveRingPercent).Append(':')
+                      .Append(d.IsCharging).Append(':')
+                      .Append(d.IsConnected).Append(':')
+                      .Append(d.StatusNote).Append(';');
+        }
+
+        string signature = sigBuilder.ToString();
+        if (!force && signature == _lastRenderedSignature)
+            return;
+
+        _lastRenderedSignature = signature;
+
+        EmptyStateText.Visibility = Visibility.Collapsed;
+        DevicesPanel.Children.Clear();
+
+        foreach (var device in pageDevices)
         {
             DevicesPanel.Children.Add(BuildRadialDeviceCard(device));
         }
+
+        RenderPagination(totalPages);
+    }
+
+    private void RenderPagination(int totalPages)
+    {
+        PaginationPanel.Children.Clear();
+        if (totalPages <= 1)
+        {
+            PaginationPanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        PaginationPanel.Visibility = Visibility.Visible;
+
+        for (int i = 0; i < totalPages; i++)
+        {
+            int targetPage = i;
+            bool isActive = i == _currentPage;
+            var dot = new Ellipse
+            {
+                Width = isActive ? 14 : 6,
+                Height = 6,
+                Margin = new Thickness(3, 0, 3, 0),
+                Cursor = System.Windows.Input.Cursors.Hand,
+                Fill = new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString(
+                    isActive ? "#22C55E" : "#4B5563"))
+            };
+            dot.MouseLeftButtonDown += (_, e) =>
+            {
+                e.Handled = true;
+                _currentPage = targetPage;
+                RenderCurrentPage(force: true);
+            };
+            PaginationPanel.Children.Add(dot);
+        }
+
+        PaginationPanel.Children.Add(new TextBlock
+        {
+            Text = $"  {_currentPage + 1}/{totalPages} (↕)",
+            FontSize = 9.5,
+            Foreground = new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#6B7280")),
+            VerticalAlignment = VerticalAlignment.Center
+        });
     }
 
     private UIElement BuildRadialDeviceCard(DeviceBatteryInfo device)
@@ -117,24 +211,25 @@ public partial class WidgetWindow : Window
         });
 
         // Foreground progress arc
-        int displayPct = Math.Clamp(device.BatteryPercent, 0, 100);
-        if (device.BatteryPercent > 0)
+        int ringFill = device.EffectiveRingPercent;
+        if (ringFill > 0)
         {
-            ringGrid.Children.Add(CreateProgressArc(displayPct, accent));
+            ringGrid.Children.Add(CreateProgressArc(Math.Clamp(ringFill, 1, 100), accent));
         }
 
-        // Center percentage text
+        // Center percentage or qualitative level text
         var centerStack = new StackPanel
         {
             HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center
         };
 
+        bool isQualitative = !string.IsNullOrEmpty(device.DisplayLevelText);
         centerStack.Children.Add(new TextBlock
         {
-            Text = device.BatteryPercent >= 0 ? $"{device.BatteryPercent}%" : "--",
-            FontFamily = new System.Windows.Media.FontFamily("Consolas, Segoe UI"),
-            FontSize = 17,
+            Text = device.PercentText,
+            FontFamily = new System.Windows.Media.FontFamily(isQualitative ? "Segoe UI" : "Consolas, Segoe UI"),
+            FontSize = isQualitative ? 12.5 : 17,
             FontWeight = FontWeights.Bold,
             Foreground = WpfBrushes.White,
             HorizontalAlignment = System.Windows.HorizontalAlignment.Center
@@ -235,15 +330,36 @@ public partial class WidgetWindow : Window
 
     private static WpfBrush GetBatteryBrush(DeviceBatteryInfo device)
     {
-        if (!device.IsConnected || device.BatteryPercent < 0)
+        int effective = device.EffectiveRingPercent;
+        if (!device.IsConnected || effective < 0)
             return new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#6B7280"));
         if (device.IsCharging)
             return new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#38BDF8"));
-        if (device.BatteryPercent <= 15)
+        if (effective <= 25 && (device.BatteryPercent <= 15 || string.Equals(device.DisplayLevelText, "Düşük", StringComparison.OrdinalIgnoreCase) || string.Equals(device.DisplayLevelText, "Boş", StringComparison.OrdinalIgnoreCase)))
             return new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#EF4444"));
-        if (device.BatteryPercent <= 35)
+        if (effective <= 35)
             return new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#F59E0B"));
         return new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#22C55E"));
+    }
+
+    private void Window_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        int totalPages = Math.Max(1, (int)Math.Ceiling(_allDevices.Count / (double)PageSize));
+        if (totalPages <= 1)
+            return;
+
+        if (e.Delta < 0 && _currentPage < totalPages - 1)
+        {
+            _currentPage++;
+            RenderCurrentPage(force: true);
+        }
+        else if (e.Delta > 0 && _currentPage > 0)
+        {
+            _currentPage--;
+            RenderCurrentPage(force: true);
+        }
+
+        e.Handled = true;
     }
 
     private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)

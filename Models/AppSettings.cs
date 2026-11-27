@@ -9,7 +9,7 @@ public sealed class AppSettings
     public double WindowTop { get; set; } = double.NaN;
     public double Opacity { get; set; } = 0.92;
     public bool AlwaysOnTop { get; set; } = true;
-    public int PollIntervalSeconds { get; set; } = 30;
+    public int PollIntervalSeconds { get; set; } = 60;
     public int LowBatteryThreshold { get; set; } = 15;
     public bool EnableLowBatteryNotifications { get; set; } = true;
     public bool StartWithWindows { get; set; } = false;

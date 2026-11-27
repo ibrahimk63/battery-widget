@@ -116,8 +116,8 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="52" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock Text="Tarama Sıklığı (saniye):" VerticalAlignment="Center" />
-                        <Slider x:Name="IntervalSlider" Grid.Column="1" Minimum="10" Maximum="120" TickFrequency="10" IsSnapToTickEnabled="True" ValueChanged="Slider_ValueChanged" />
+                        <TextBlock Text="Tarama Sıklığı (CPU Opt.):" VerticalAlignment="Center" />
+                        <Slider x:Name="IntervalSlider" Grid.Column="1" Minimum="0" Maximum="6" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="Slider_ValueChanged" />
                         <TextBlock x:Name="IntervalValueText" Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="#38BDF8" FontWeight="SemiBold" />
                     </Grid>
 

@@ -1,6 +1,6 @@
 # BatteryWidget
 
-Windows için kablosuz cihazlarınızın (2.4GHz USB dongle ve Bluetooth) pil yüzdelerini ve şarj durumlarını **tek bir masaüstü widget'ında ve Sistem Tepsisinde (System Tray)** gösteren hafif bir C# / .NET WPF uygulamasıdır.
+Windows için kablosuz cihazlarınızın (2.4GHz USB dongle, Bluetooth ve oyun kolları) pil yüzdelerini ve şarj durumlarını **tek bir masaüstü widget'ında ve Sistem Tepsisinde (System Tray)** gösteren hafif bir C# / .NET WPF uygulamasıdır.
 
 ## Tek Tıkla İndir (Kurulumsuz)
 
@@ -13,16 +13,18 @@ Bilgisayarınızda .NET kurulu olmasına gerek yoktur; tek dosyayı indirip doğ
 
 - **HyperX Cloud III Wireless** (`0x03F0:0x05B7` / `0x0FCC` / `0x098D`) — 62-byte USB HID kontrol kanalı (`0x66 / 0x89` & `0x66 / 0x8A`)
 - **Darmoshark M3 V2** (`0x0BDA:0xFFE0` 2.4GHz alıcı & `0x0BDA:0xFFEA` kablolu) — Realtek 64-byte HID (`0xB5 / 0x05`)
-- **Bluetooth Cihazları (BLE / GATT)** — Standart GATT Battery Service (`0x180F` / `0x2A19`) sunan tüm Bluetooth cihazlarını otomatik algılar
+- **Bluetooth Cihazları (Classic + BLE)** — Hem Windows PnP (`DEVPKEY_Bluetooth_Battery` — Classic Bluetooth kulaklık, fare, klavye vb.) hem de BLE GATT Battery Service (`0x180F` / `0x2A19`) cihazlarını otomatik algılar
+- **Oyun Kolları (Xbox & PlayStation)** — Xbox Kablosuz Dongle / USB / Bluetooth kolları (`XInput` + `Windows.Gaming.Input` — gerçek yüzde veya `Dolu`/`Orta`/`Düşük`/`Boş` kademe gösterimi) ve DualSense / DualShock 4
+- **Standart USB/HID Pil Aygıtları** — Standart HID pil raporu sunan diğer harici kablosuz cihazları otomatik algılar (dizüstü bilgisayarın dahili pilini hariç tutar)
 - **Özel USB / 2.4GHz Profilleri (`profiles/*.json`)** — Kod yazmadan yeni cihazlar eklemek için JSON profil desteği (`profiles/_template.json.example`)
 
 ## Özellikler
 
-- **Minimalist Modern Dashboard UI**: Yan yana yuvarlak pil halkalı (radial ring) kompakt koyu kartlar, büyük dijital yüzdeler, uyku modunda son bilinen pil yüzdesini koruma.
+- **Kompakt 2'li Sayfalı Dashboard UI**: Ekranda her zaman en fazla 2 cihaz kartı gösterilir; 2'den fazla cihaz bağlandığında fare tekerleği (scroll) veya sayfa noktaları ile sayfalar arasında geçiş yapılır.
+- **CPU Optimizasyonu**: 5 dakikaya kadar seçilebilir akıllı tarama adımları (`10 sn`, `20 sn`, `30 sn`, `1 dk`, `2 dk`, `3 dk`, `5 dk`), önbellekli HID descriptor taraması ve değişmeyen arayüzde sıfır yeniden çizim.
 - **Sistem Tepsisi (System Tray)**: Özel pil simgesi, tooltip özeti ve hızlı menü.
-- **Düşük Pil Bildirimi**: Belirlenen eşiğin (varsayılan `%15`) altına düşen cihazlar için spam önlemeli Windows bildirimi.
-- **Windows Başlangıcı**: Ayarlardan tek tıkla Windows açılışında otomatik başlatma.
-- **Dahili HID Tanılama & Paket Testi**: Yeni cihazların VID/PID ve rapor boyutlarını listeleme.
+- **Düşük Pil Bildirimi**: Belirlenen eşiğin (varsayılan `%15` veya `Düşük`/`Boş`) altına düşen cihazlar için spam önlemeli Windows bildirimi.
+- **Windows Başlangıcı & Dahili HID Tanılama**: Ayarlardan tek tıkla başlangıç ayarı ve VID/PID paket testi.
 
 ## Derleme ve Test
 

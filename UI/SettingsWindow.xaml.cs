@@ -6,6 +6,8 @@ namespace BatteryWidget.UI;
 
 public partial class SettingsWindow : Window
 {
+    private static readonly int[] IntervalStepsSeconds = [10, 20, 30, 60, 120, 180, 300];
+
     private readonly AppSettings _settings;
     private readonly Action _onSaved;
 
@@ -19,11 +21,27 @@ public partial class SettingsWindow : Window
         StartWithWindowsCheck.IsChecked = _settings.StartWithWindows;
         LowBatteryNotifCheck.IsChecked = _settings.EnableLowBatteryNotifications;
         ThresholdSlider.Value = _settings.LowBatteryThreshold;
-        IntervalSlider.Value = _settings.PollIntervalSeconds;
+        IntervalSlider.Value = FindNearestStepIndex(_settings.PollIntervalSeconds);
         OpacitySlider.Value = _settings.Opacity;
 
         UpdateLabels();
         HidReportBox.Text = HidDiagnosticService.GenerateHidReport();
+    }
+
+    private static int FindNearestStepIndex(int seconds)
+    {
+        int bestIndex = 0;
+        int bestDiff = int.MaxValue;
+        for (int i = 0; i < IntervalStepsSeconds.Length; i++)
+        {
+            int diff = Math.Abs(IntervalStepsSeconds[i] - seconds);
+            if (diff < bestDiff)
+            {
+                bestDiff = diff;
+                bestIndex = i;
+            }
+        }
+        return bestIndex;
     }
 
     private void Slider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -35,7 +53,9 @@ public partial class SettingsWindow : Window
     private void UpdateLabels()
     {
         ThresholdValueText.Text = $"%{(int)ThresholdSlider.Value}";
-        IntervalValueText.Text = $"{(int)IntervalSlider.Value}s";
+        int idx = Math.Clamp((int)Math.Round(IntervalSlider.Value), 0, IntervalStepsSeconds.Length - 1);
+        int sec = IntervalStepsSeconds[idx];
+        IntervalValueText.Text = sec >= 60 ? $"{sec / 60} dk" : $"{sec} sn";
         OpacityValueText.Text = $"%{(int)(OpacitySlider.Value * 100)}";
     }
 
@@ -56,11 +76,13 @@ public partial class SettingsWindow : Window
 
     private void Save_Click(object sender, RoutedEventArgs e)
     {
+        int idx = Math.Clamp((int)Math.Round(IntervalSlider.Value), 0, IntervalStepsSeconds.Length - 1);
+
         _settings.AlwaysOnTop = AlwaysOnTopCheck.IsChecked == true;
         _settings.StartWithWindows = StartWithWindowsCheck.IsChecked == true;
         _settings.EnableLowBatteryNotifications = LowBatteryNotifCheck.IsChecked == true;
         _settings.LowBatteryThreshold = (int)ThresholdSlider.Value;
-        _settings.PollIntervalSeconds = (int)IntervalSlider.Value;
+        _settings.PollIntervalSeconds = IntervalStepsSeconds[idx];
         _settings.Opacity = OpacitySlider.Value;
 
         _onSaved();
