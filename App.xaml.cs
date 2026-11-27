@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using BatteryWidget.Models;
 using BatteryWidget.Providers;
@@ -15,6 +16,11 @@ public partial class App : System.Windows.Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+            WriteCrashLog("AppDomain", args.ExceptionObject as Exception);
+        DispatcherUnhandledException += (_, args) =>
+            WriteCrashLog("Dispatcher", args.Exception);
+
         base.OnStartup(e);
 
         _settings = AppSettings.Load();
@@ -85,5 +91,22 @@ public partial class App : System.Windows.Application
         _monitorService.Dispose();
         _trayManager.Dispose();
         Shutdown();
+    }
+
+    private static void WriteCrashLog(string source, Exception? ex)
+    {
+        try
+        {
+            var dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "BatteryWidget");
+            Directory.CreateDirectory(dir);
+            var logPath = Path.Combine(dir, "crash.log");
+            File.AppendAllText(logPath, $"[{DateTimeOffset.Now:O}] ({source}) {ex}\n\n");
+        }
+        catch
+        {
+            // Ignore crash logger failure
+        }
     }
 }
