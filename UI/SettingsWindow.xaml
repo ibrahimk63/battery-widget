@@ -1,13 +1,15 @@
 <Window x:Class="BatteryWidget.UI.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Battery Widget — Ayarlar &amp; Aygıt Tanılama"
-        Width="610"
-        Height="490"
+        Title="Battery Widget — Ayarlar"
+        Width="700"
+        Height="600"
+        MinWidth="660"
+        MinHeight="540"
         WindowStartupLocation="CenterScreen"
         Background="#0F1117"
         Foreground="#F3F4F6"
-        ResizeMode="NoResize">
+        ResizeMode="CanResize">
 
     <Window.Resources>
         <Style TargetType="TextBlock">
@@ -18,7 +20,40 @@
         <Style TargetType="CheckBox">
             <Setter Property="Foreground" Value="#F3F4F6" />
             <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="Medium" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+
+        <Style x:Key="SectionCard" TargetType="Border">
+            <Setter Property="Background" Value="#141821" />
+            <Setter Property="BorderBrush" Value="#252C3D" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Padding" Value="14,12" />
+            <Setter Property="Margin" Value="0,0,0,12" />
+        </Style>
+
+        <Style x:Key="InfoBanner" TargetType="Border">
+            <Setter Property="Background" Value="#111D2C" />
+            <Setter Property="BorderBrush" Value="#1E3A5F" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Padding" Value="12,10" />
+            <Setter Property="Margin" Value="0,0,0,12" />
+        </Style>
+
+        <Style x:Key="SubHintText" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#9CA3AF" />
+            <Setter Property="FontSize" Value="11.5" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+
+        <Style x:Key="SectionTitleText" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#F9FAFB" />
+            <Setter Property="FontSize" Value="13.5" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,0,0,8" />
         </Style>
 
         <Style x:Key="DarkTextBox" TargetType="TextBox">
@@ -36,9 +71,42 @@
             <Setter Property="Foreground" Value="#F3F4F6" />
             <Setter Property="BorderBrush" Value="#374151" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Padding" Value="12,6" />
+            <Setter Property="Padding" Value="12,7" />
             <Setter Property="FontSize" Value="12.5" />
             <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#2F364A" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#3B4258" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="AccentButton" TargetType="Button" BasedOn="{StaticResource DarkButton}">
+            <Setter Property="Background" Value="#22C55E" />
+            <Setter Property="Foreground" Value="#09110D" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
@@ -52,13 +120,13 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#2F364A" />
+                                <Setter TargetName="Bd" Property="Background" Value="#34D399" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#3B4258" />
+                                <Setter TargetName="Bd" Property="Background" Value="#16A34A" />
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="Bd" Property="Opacity" Value="0.5" />
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.45" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -66,18 +134,49 @@
             </Setter>
         </Style>
 
-        <Style x:Key="AccentButton" TargetType="Button" BasedOn="{StaticResource DarkButton}">
-            <Setter Property="Background" Value="#22C55E" />
-            <Setter Property="Foreground" Value="#09110D" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="BorderThickness" Value="0" />
+        <Style x:Key="DangerButton" TargetType="Button" BasedOn="{StaticResource DarkButton}">
+            <Setter Property="Background" Value="#2C1B20" />
+            <Setter Property="BorderBrush" Value="#7F1D1D" />
+            <Setter Property="Foreground" Value="#FCA5A5" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#3D222A" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#4C2630" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="ActionCardButton" TargetType="Button" BasedOn="{StaticResource DarkButton}">
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Padding" Value="12,9" />
         </Style>
 
         <Style TargetType="TabItem">
             <Setter Property="Foreground" Value="#9CA3AF" />
             <Setter Property="FontSize" Value="13" />
             <Setter Property="FontWeight" Value="Medium" />
-            <Setter Property="Padding" Value="14,8" />
+            <Setter Property="Padding" Value="14,9" />
+            <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="TabItem">
@@ -99,209 +198,565 @@
         </Style>
 
         <Style x:Key="DarkComboBoxItem" TargetType="ComboBoxItem">
-            <Setter Property="Background" Value="#181C26" />
+            <Setter Property="Background" Value="#141821" />
             <Setter Property="Foreground" Value="#F3F4F6" />
-            <Setter Property="Padding" Value="8,5" />
+            <Setter Property="Padding" Value="10,6" />
             <Style.Triggers>
                 <Trigger Property="IsHighlighted" Value="True">
-                    <Setter Property="Background" Value="#2F364A" />
+                    <Setter Property="Background" Value="#243247" />
+                    <Setter Property="Foreground" Value="#FFFFFF" />
                 </Trigger>
                 <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="#232836" />
+                    <Setter Property="Background" Value="#1E293B" />
+                    <Setter Property="Foreground" Value="#FFFFFF" />
                 </Trigger>
             </Style.Triggers>
         </Style>
+
+        <Style x:Key="DarkComboBox" TargetType="ComboBox">
+            <Setter Property="Background" Value="#0D1017" />
+            <Setter Property="Foreground" Value="#F3F4F6" />
+            <Setter Property="BorderBrush" Value="#374151" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="10,6" />
+            <Setter Property="FontSize" Value="12.5" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton x:Name="ToggleButton"
+                                          Background="{TemplateBinding Background}"
+                                          BorderBrush="{TemplateBinding BorderBrush}"
+                                          BorderThickness="{TemplateBinding BorderThickness}"
+                                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                          Focusable="False"
+                                          ClickMode="Press"
+                                          Cursor="Hand">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border x:Name="Bd"
+                                                Background="{TemplateBinding Background}"
+                                                BorderBrush="{TemplateBinding BorderBrush}"
+                                                BorderThickness="{TemplateBinding BorderThickness}"
+                                                CornerRadius="8">
+                                            <Grid Margin="10,6">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="1"
+                                                           Text="▾"
+                                                           Foreground="#9CA3AF"
+                                                           FontSize="12"
+                                                           VerticalAlignment="Center"
+                                                           Margin="8,0,0,0" />
+                                            </Grid>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="Bd" Property="BorderBrush" Value="#4B5563" />
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+
+                            <ContentPresenter x:Name="ContentSite"
+                                              IsHitTestVisible="False"
+                                              Content="{TemplateBinding SelectionBoxItem}"
+                                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                              Margin="10,6,28,6"
+                                              VerticalAlignment="Center"
+                                              HorizontalAlignment="Left"
+                                              TextElement.Foreground="#F3F4F6" />
+
+                            <Popup x:Name="Popup"
+                                   Placement="Bottom"
+                                   IsOpen="{TemplateBinding IsDropDownOpen}"
+                                   AllowsTransparency="True"
+                                   Focusable="False"
+                                   PopupAnimation="Slide">
+                                <Grid x:Name="DropDown"
+                                      SnapsToDevicePixels="True"
+                                      MinWidth="{TemplateBinding ActualWidth}"
+                                      MaxHeight="{TemplateBinding MaxDropDownHeight}">
+                                    <Border Background="#141821"
+                                            BorderBrush="#374151"
+                                            BorderThickness="1"
+                                            CornerRadius="8"
+                                            Margin="0,4,0,0"
+                                            Padding="2">
+                                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                            <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Contained" />
+                                        </ScrollViewer>
+                                    </Border>
+                                </Grid>
+                            </Popup>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="DarkListBoxItem" TargetType="ListBoxItem">
+            <Setter Property="Foreground" Value="#E5E7EB" />
+            <Setter Property="Padding" Value="8,5" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="5" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#1F2738" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#243247" />
+                                <Setter Property="Foreground" Value="#FFFFFF" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
-    <Grid Margin="16">
+    <Grid Margin="18">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <TabControl Background="#181C26" BorderBrush="#262C3D" BorderThickness="1" Padding="14">
+        <StackPanel Grid.Row="0" Margin="2,0,2,12">
+            <TextBlock Text="Ayarlar" FontSize="18" FontWeight="SemiBold" Foreground="#F9FAFB" />
+            <TextBlock Text="Pil göstergesinin görünümünü, cihazlarınızı ve sorun giderme araçlarını buradan kolayca yönetebilirsiniz."
+                       Style="{StaticResource SubHintText}"
+                       FontSize="12"
+                       Margin="0,3,0,0" />
+        </StackPanel>
+
+        <TabControl Grid.Row="1" Background="#181C26" BorderBrush="#262C3D" BorderThickness="1" Padding="14">
             <TabItem Header="Genel Ayarlar">
-                <StackPanel Margin="6">
-                    <CheckBox x:Name="AlwaysOnTopCheck" Content="Widget her zaman üstte dursun" Margin="0,0,0,12" />
-                    <CheckBox x:Name="StartWithWindowsCheck" Content="Windows açılışında otomatik başlat" Margin="0,0,0,12" />
-                    <CheckBox x:Name="LowBatteryNotifCheck" Content="Düşük pilde Windows bildirimi gönder" Margin="0,0,0,18" />
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,4,0">
+                    <StackPanel>
+                        <Border Style="{StaticResource SectionCard}">
+                            <StackPanel>
+                                <TextBlock Text="Görünüm ve Başlangıç" Style="{StaticResource SectionTitleText}" />
 
-                    <Grid Margin="0,0,0,14">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="210" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="52" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Text="Düşük Pil Eşiği (%):" VerticalAlignment="Center" />
-                        <Slider x:Name="ThresholdSlider" Grid.Column="1" Minimum="5" Maximum="40" TickFrequency="5" IsSnapToTickEnabled="True" ValueChanged="Slider_ValueChanged" />
-                        <TextBlock x:Name="ThresholdValueText" Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="#22C55E" FontWeight="SemiBold" />
-                    </Grid>
+                                <CheckBox x:Name="AlwaysOnTopCheck" Content="Widget her zaman üstte dursun" />
+                                <TextBlock Text="Açık olduğunda pil penceresi diğer pencerelerin üzerinde sabit kalır. Tam ekran oyunlarda rahatsız ederse kapatabilirsiniz."
+                                           Style="{StaticResource SubHintText}"
+                                           Margin="22,2,0,12" />
 
-                    <Grid Margin="0,0,0,14">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="210" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="52" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Text="Tarama Sıklığı (CPU Opt.):" VerticalAlignment="Center" />
-                        <Slider x:Name="IntervalSlider" Grid.Column="1" Minimum="0" Maximum="6" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="Slider_ValueChanged" />
-                        <TextBlock x:Name="IntervalValueText" Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="#38BDF8" FontWeight="SemiBold" />
-                    </Grid>
+                                <CheckBox x:Name="StartWithWindowsCheck" Content="Bilgisayar açıldığında otomatik başlat" />
+                                <TextBlock Text="Windows açılışında sistem tepsisinde (sağ alt) kendiliğinden çalışır."
+                                           Style="{StaticResource SubHintText}"
+                                           Margin="22,2,0,14" />
 
-                    <Grid Margin="0,0,0,14">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="210" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="52" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Text="Widget Saydamlığı:" VerticalAlignment="Center" />
-                        <Slider x:Name="OpacitySlider" Grid.Column="1" Minimum="0.4" Maximum="1.0" TickFrequency="0.05" IsSnapToTickEnabled="True" ValueChanged="Slider_ValueChanged" />
-                        <TextBlock x:Name="OpacityValueText" Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="#F3F4F6" FontWeight="SemiBold" />
-                    </Grid>
-                </StackPanel>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="190" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="56" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Widget Saydamlığı:" VerticalAlignment="Center" FontWeight="Medium" />
+                                    <Slider x:Name="OpacitySlider" Grid.Column="1" Minimum="0.4" Maximum="1.0" TickFrequency="0.05" IsSnapToTickEnabled="True" ValueChanged="Slider_ValueChanged" VerticalAlignment="Center" />
+                                    <TextBlock x:Name="OpacityValueText" Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="#F3F4F6" FontWeight="SemiBold" />
+                                </Grid>
+                                <TextBlock Text="Masaüstündeki pil penceresinin ne kadar şeffaf görüneceğini ayarlar."
+                                           Style="{StaticResource SubHintText}"
+                                           Margin="0,3,0,0" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource SectionCard}" Margin="0">
+                            <StackPanel>
+                                <TextBlock Text="Pil Bildirimleri ve Performans" Style="{StaticResource SectionTitleText}" />
+
+                                <CheckBox x:Name="LowBatteryNotifCheck" Content="Pil azaldığında Windows bildirimi gönder" />
+                                <TextBlock Text="Herhangi bir cihazın şarjı aşağıdaki seviyenin altına düştüğünde uyarı verir."
+                                           Style="{StaticResource SubHintText}"
+                                           Margin="22,2,0,14" />
+
+                                <Grid Margin="0,0,0,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="190" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="56" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Düşük Pil Uyarı Seviyesi:" VerticalAlignment="Center" FontWeight="Medium" />
+                                    <Slider x:Name="ThresholdSlider" Grid.Column="1" Minimum="5" Maximum="40" TickFrequency="5" IsSnapToTickEnabled="True" ValueChanged="Slider_ValueChanged" VerticalAlignment="Center" />
+                                    <TextBlock x:Name="ThresholdValueText" Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="#22C55E" FontWeight="SemiBold" />
+                                </Grid>
+                                <TextBlock Text="Bildirimin hangi pil yüzdesinde tetikleneceğini belirler."
+                                           Style="{StaticResource SubHintText}"
+                                           Margin="0,2,0,14" />
+
+                                <Grid Margin="0,0,0,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="190" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="56" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Pil Yenileme Sıklığı:" VerticalAlignment="Center" FontWeight="Medium" />
+                                    <Slider x:Name="IntervalSlider" Grid.Column="1" Minimum="0" Maximum="6" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="Slider_ValueChanged" VerticalAlignment="Center" />
+                                    <TextBlock x:Name="IntervalValueText" Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="#38BDF8" FontWeight="SemiBold" />
+                                </Grid>
+                                <TextBlock Text="Cihazların şarjının ne sıklıkla kontrol edileceğini seçin. Daha uzun süre daha az işlemci kullanır (Önerilen: 1 dk)."
+                                           Style="{StaticResource SubHintText}"
+                                           Margin="0,2,0,0" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
             </TabItem>
 
-            <TabItem Header="Aygıt Tanılama">
-                <Grid Margin="4">
+            <TabItem Header="Cihazlarım">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,4,0">
+                    <StackPanel>
+                        <Border Style="{StaticResource SectionCard}">
+                            <StackPanel>
+                                <TextBlock Text="Ekranda Görünen Aktif Cihazlar" Style="{StaticResource SectionTitleText}" />
+                                <TextBlock Text="Şu an widget üzerinde gösterilen cihazlar. Görmek istemediğiniz bir cihazı seçip gizleyebilirsiniz (veya widget kartına sağ tıklayabilirsiniz)."
+                                           Style="{StaticResource SubHintText}"
+                                           Margin="0,0,0,8" />
+
+                                <ListBox x:Name="ActiveDevicesListBox"
+                                         Height="96"
+                                         Background="#0D1017"
+                                         Foreground="#E5E7EB"
+                                         BorderBrush="#262C3D"
+                                         ItemContainerStyle="{StaticResource DarkListBoxItem}"
+                                         FontSize="12"
+                                         Margin="0,0,0,8" />
+
+                                <StackPanel Orientation="Horizontal">
+                                    <Button x:Name="HideActiveBtn"
+                                            Content="Seçili Cihazı Gizle"
+                                            Style="{StaticResource DangerButton}"
+                                            Click="HideActiveDevice_Click"
+                                            ToolTip="Seçtiğiniz cihazı widget ekranından kaldırır."
+                                            Margin="0,0,8,0" />
+                                    <Button x:Name="RefreshActiveBtn"
+                                            Content="Cihazları Şimdi Yenile"
+                                            Style="{StaticResource DarkButton}"
+                                            Click="RefreshActiveDevices_Click"
+                                            ToolTip="Bağlı cihazları ve pil durumlarını yeniden tarar." />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource SectionCard}">
+                            <StackPanel>
+                                <TextBlock Text="Gizlenen Cihazlar" Style="{StaticResource SectionTitleText}" />
+                                <TextBlock Text="Daha önce gizlediğiniz cihazlar burada saklanır. İstediğiniz zaman ekrana geri alabilirsiniz."
+                                           Style="{StaticResource SubHintText}"
+                                           Margin="0,0,0,8" />
+
+                                <ListBox x:Name="HiddenDevicesListBox"
+                                         Height="86"
+                                         Background="#0D1017"
+                                         Foreground="#E5E7EB"
+                                         BorderBrush="#262C3D"
+                                         ItemContainerStyle="{StaticResource DarkListBoxItem}"
+                                         FontSize="12"
+                                         Margin="0,0,0,8" />
+
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Content="Seçiliyi Ekrana Geri Getir"
+                                            Style="{StaticResource DarkButton}"
+                                            Click="UnhideSelected_Click"
+                                            ToolTip="Seçili cihazı widget'ta yeniden görünür yapar."
+                                            Margin="0,0,8,0" />
+                                    <Button Content="Tümünü Geri Getir"
+                                            Style="{StaticResource DarkButton}"
+                                            Click="UnhideAll_Click"
+                                            ToolTip="Gizlenen tüm cihazları tek tıkla geri getirir." />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource SectionCard}" Margin="0">
+                            <StackPanel>
+                                <TextBlock Text="Manuel Öğretilen Cihaz Kayıtları" Style="{StaticResource SectionTitleText}" />
+                                <TextBlock Text="'Yeni Cihaz Ekle' sekmesinden manuel tanıttığınız cihaz kayıtları. Yanlış şarj gösteriyorsa silebilirsiniz."
+                                           Style="{StaticResource SubHintText}"
+                                           Margin="0,0,0,8" />
+
+                                <ListBox x:Name="SavedProfilesListBox"
+                                         Height="74"
+                                         Background="#0D1017"
+                                         Foreground="#E5E7EB"
+                                         BorderBrush="#262C3D"
+                                         ItemContainerStyle="{StaticResource DarkListBoxItem}"
+                                         FontFamily="Consolas"
+                                         FontSize="11.5"
+                                         Margin="0,0,0,8" />
+
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Button Content="Seçili Kaydı Sil"
+                                            Style="{StaticResource DangerButton}"
+                                            Click="DeleteProfile_Click"
+                                            ToolTip="Seçili manuel cihaz kaydını kalıcı olarak siler."
+                                            Margin="0,0,12,0" />
+                                    <TextBlock x:Name="ManageStatusText"
+                                               Grid.Column="1"
+                                               Foreground="#9CA3AF"
+                                               FontSize="11.5"
+                                               VerticalAlignment="Center"
+                                               TextWrapping="Wrap" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="Yeni Cihaz Ekle">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,6,0">
+                    <StackPanel>
+                        <Border Style="{StaticResource InfoBanner}" Margin="0,0,0,10" Padding="12,9">
+                            <StackPanel>
+                                <TextBlock Text="Cihazınız otomatik algılanmıyorsa bu 3 adımı takip edin"
+                                           Foreground="#93C5FD"
+                                           FontSize="12.5"
+                                           FontWeight="SemiBold" />
+                                <TextBlock Text="Kulaklık, fare veya kolunuzun kendi yazılımından güncel şarj yüzdesini öğrenin. Aşağıdaki adımlarla Battery Widget'a pil bilgisini nasıl okuyacağını öğretebilirsiniz."
+                                           Foreground="#CBD5E1"
+                                           FontSize="11.5"
+                                           TextWrapping="Wrap"
+                                           Margin="0,3,0,0" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource SectionCard}" Margin="0,0,0,10" Padding="12,10">
+                            <StackPanel>
+                                <TextBlock Text="Adım 1 — Cihazı Seçin" Style="{StaticResource SectionTitleText}" Margin="0,0,0,6" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <ComboBox x:Name="LearnDeviceCombo"
+                                              Style="{StaticResource DarkComboBox}"
+                                              ItemContainerStyle="{StaticResource DarkComboBoxItem}"
+                                              Margin="0,0,8,0" />
+                                    <Button Grid.Column="1"
+                                            Content="Listeyi Yenile"
+                                            Style="{StaticResource DarkButton}"
+                                            Click="RefreshLearnDevices_Click"
+                                            ToolTip="Yeni taktığınız USB alıcıların listede görünmesi için yeniler." />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource SectionCard}" Margin="0,0,0,10" Padding="12,10">
+                            <StackPanel>
+                                <TextBlock Text="Adım 2 — Şu Anki Pil Yüzdesini Girin ve Tarayın" Style="{StaticResource SectionTitleText}" Margin="0,0,0,6" />
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                    <TextBlock Text="Şu Anki Pil Yüzdesi (%):" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                    <TextBox x:Name="KnownPercentBox" Width="76" Text="80" Style="{StaticResource DarkTextBox}" Margin="0,0,10,0" />
+                                    <TextBlock Text="1 ile 100 arasında tam sayı girin" Style="{StaticResource SubHintText}" VerticalAlignment="Center" />
+                                </StackPanel>
+
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="10" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <Button x:Name="FindCandidatesBtn"
+                                            Grid.Column="0"
+                                            Style="{StaticResource ActionCardButton}"
+                                            Click="FindCandidates_Click">
+                                        <StackPanel>
+                                            <TextBlock Text="1. Pil Bilgisini Ara" FontWeight="SemiBold" FontSize="12.5" Foreground="#F9FAFB" />
+                                            <TextBlock Text="Girdiğiniz yüzdeyi cihazın gönderdiği verilerde tarar" FontSize="11" Foreground="#9CA3AF" TextWrapping="Wrap" Margin="0,2,0,0" />
+                                        </StackPanel>
+                                    </Button>
+
+                                    <Button x:Name="RefineCandidatesBtn"
+                                            Grid.Column="2"
+                                            Style="{StaticResource ActionCardButton}"
+                                            Click="RefineCandidates_Click"
+                                            IsEnabled="False">
+                                        <StackPanel>
+                                            <TextBlock Text="2. Sonucu Doğrula (İsteğe Bağlı)" FontWeight="SemiBold" FontSize="12.5" Foreground="#F9FAFB" />
+                                            <TextBlock Text="Çok sonuç çıkarsa şarj %1 değişince yeni değeri yazıp basın" FontSize="11" Foreground="#9CA3AF" TextWrapping="Wrap" Margin="0,2,0,0" />
+                                        </StackPanel>
+                                    </Button>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource SectionCard}" Margin="0" Padding="12,10">
+                            <StackPanel>
+                                <TextBlock Text="Adım 3 — Bulunan Sonucu Kaydedin" Style="{StaticResource SectionTitleText}" Margin="0,0,0,6" />
+
+                                <ListBox x:Name="CandidatesListBox"
+                                         Height="120"
+                                         Background="#0D1017"
+                                         Foreground="#E5E7EB"
+                                         BorderBrush="#262C3D"
+                                         ItemContainerStyle="{StaticResource DarkListBoxItem}"
+                                         FontFamily="Consolas"
+                                         FontSize="11.5"
+                                         Margin="0,0,0,10" />
+
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock x:Name="LearnStatusText"
+                                               Text="Cihazınızı seçip şu anki pil yüzdesini girin ve '1. Pil Bilgisini Ara'ya basın."
+                                               Foreground="#9CA3AF"
+                                               FontSize="11.5"
+                                               VerticalAlignment="Center"
+                                               TextWrapping="Wrap"
+                                               Margin="0,0,10,0" />
+                                    <Button x:Name="SaveLearnedBtn"
+                                            Grid.Column="1"
+                                            Content="Cihazı Kaydet ve Ekle"
+                                            Style="{StaticResource AccentButton}"
+                                            Click="SaveLearned_Click"
+                                            ToolTip="Seçili sonucu kalıcı olarak kaydeder ve widget'ta göstermeye başlar."
+                                            IsEnabled="False" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="Sorun Giderme">
+                <Grid>
                     <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
 
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                        <Button x:Name="UniversalScanBtn" Content="Tüm Aygıtları Tara &amp; Tanıla" Style="{StaticResource DarkButton}" Click="UniversalScan_Click" Margin="0,0,8,0" />
-                        <Button Content="Ham HID Listesi" Style="{StaticResource DarkButton}" Click="ScanHid_Click" Margin="0,0,8,0" />
-                        <Button Content="Kopyala" Style="{StaticResource DarkButton}" Click="CopyHid_Click" />
-                    </StackPanel>
+                    <Border Grid.Row="0" Style="{StaticResource InfoBanner}" Margin="0,0,0,10">
+                        <StackPanel>
+                            <TextBlock Text="Bir cihaz görünmüyor mu veya yanlış şarj mı gösteriyor?"
+                                       Foreground="#93C5FD"
+                                       FontSize="12.5"
+                                       FontWeight="SemiBold" />
+                            <TextBlock Text="1) 'Tüm Cihazları Tara'ya basın.  2) 'Sorun Bildir (GitHub)' tuşuna basın — rapor otomatik panoya kopyalanır ve destek sayfamız açılır; açılan kutuya Ctrl+V ile yapıştırıp göndermeniz yeterli."
+                                       Foreground="#CBD5E1"
+                                       FontSize="11.5"
+                                       TextWrapping="Wrap"
+                                       Margin="0,3,0,0" />
+                        </StackPanel>
+                    </Border>
+
+                    <Grid Grid.Row="1" Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="8" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="8" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <Button x:Name="UniversalScanBtn"
+                                Grid.Column="0"
+                                Style="{StaticResource ActionCardButton}"
+                                Click="UniversalScan_Click">
+                            <StackPanel>
+                                <TextBlock Text="1. Tüm Cihazları Tara" FontWeight="SemiBold" FontSize="12.5" Foreground="#F9FAFB" />
+                                <TextBlock Text="Bluetooth, USB ve kablosuz aygıtların raporunu çıkarır" FontSize="11" Foreground="#9CA3AF" TextWrapping="Wrap" Margin="0,2,0,0" />
+                            </StackPanel>
+                        </Button>
+
+                        <Button x:Name="ReportIssueBtn"
+                                Grid.Column="2"
+                                Style="{StaticResource ActionCardButton}"
+                                Background="#132A1E"
+                                BorderBrush="#22C55E"
+                                Click="ReportIssue_Click">
+                            <StackPanel>
+                                <TextBlock Text="2. Sorun Bildir (GitHub)" FontWeight="SemiBold" FontSize="12.5" Foreground="#4ADE80" />
+                                <TextBlock Text="Raporu kopyalar ve destek sayfasını açar (Ctrl+V yapın)" FontSize="11" Foreground="#A7F3D0" TextWrapping="Wrap" Margin="0,2,0,0" />
+                            </StackPanel>
+                        </Button>
+
+                        <Button x:Name="CopyReportBtn"
+                                Grid.Column="4"
+                                Style="{StaticResource ActionCardButton}"
+                                Click="CopyHid_Click">
+                            <StackPanel>
+                                <TextBlock Text="Sadece Raporu Kopyala" FontWeight="SemiBold" FontSize="12.5" Foreground="#F9FAFB" />
+                                <TextBlock Text="Panoya kopyalar (Discord veya mesajla göndermek için)" FontSize="11" Foreground="#9CA3AF" TextWrapping="Wrap" Margin="0,2,0,0" />
+                            </StackPanel>
+                        </Button>
+                    </Grid>
+
+                    <Grid Grid.Row="2" Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="DiagStatusText"
+                                   Grid.Column="0"
+                                   Text=""
+                                   Foreground="#22C55E"
+                                   FontSize="11.5"
+                                   VerticalAlignment="Center"
+                                   TextWrapping="Wrap"
+                                   Margin="2,0,10,0" />
+                        <Button x:Name="ScanHidBtn"
+                                Grid.Column="1"
+                                Content="Gelişmiş: Ham USB / HID Listesi"
+                                Style="{StaticResource DarkButton}"
+                                Padding="10,4"
+                                FontSize="11.5"
+                                Click="ScanHid_Click"
+                                ToolTip="Sadece ham USB donanım kimliklerini listeler" />
+                    </Grid>
 
                     <TextBox x:Name="HidReportBox"
-                             Grid.Row="1"
+                             Grid.Row="3"
+                             MinHeight="130"
                              IsReadOnly="True"
                              FontFamily="Consolas"
                              FontSize="11.5"
                              Background="#0D1017"
                              Foreground="#E5E7EB"
                              BorderBrush="#262C3D"
-                             Padding="8"
+                             Padding="10"
                              VerticalScrollBarVisibility="Auto"
                              HorizontalScrollBarVisibility="Auto"
                              TextWrapping="NoWrap" />
                 </Grid>
             </TabItem>
-
-            <TabItem Header="Cihaz Öğret (Auto-Learn)">
-                <Grid Margin="4">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-
-                    <TextBlock Text="Otomatik tanınmayan yeni bir 2.4GHz/USB cihazın güncel şarj yüzdesini yazarak pil baytını otomatik keşfedin."
-                               Foreground="#9CA3AF"
-                               FontSize="11.5"
-                               TextWrapping="Wrap"
-                               Margin="0,0,0,10" />
-
-                    <Grid Grid.Row="1" Margin="0,0,0,10">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="120" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Text="Hedef Cihaz:" VerticalAlignment="Center" />
-                        <ComboBox x:Name="LearnDeviceCombo"
-                                  Grid.Column="1"
-                                  Background="#0D1017"
-                                  Foreground="#111827"
-                                  ItemContainerStyle="{StaticResource DarkComboBoxItem}"
-                                  Padding="6,4"
-                                  Margin="0,0,8,0" />
-                        <Button Grid.Column="2" Content="Yenile" Style="{StaticResource DarkButton}" Click="RefreshLearnDevices_Click" />
-                    </Grid>
-
-                    <Grid Grid.Row="2" Margin="0,0,0,10">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="120" />
-                            <ColumnDefinition Width="74" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Text="Mevcut Şarj (%):" VerticalAlignment="Center" />
-                        <TextBox x:Name="KnownPercentBox" Grid.Column="1" Text="80" Style="{StaticResource DarkTextBox}" Margin="0,0,8,0" />
-                        <Button x:Name="FindCandidatesBtn" Grid.Column="2" Content="1. Adayları Bul" Style="{StaticResource DarkButton}" Click="FindCandidates_Click" Margin="0,0,8,0" />
-                        <Button x:Name="RefineCandidatesBtn" Grid.Column="3" Content="2. Daralt (Doğrula)" Style="{StaticResource DarkButton}" Click="RefineCandidates_Click" IsEnabled="False" />
-                    </Grid>
-
-                    <ListBox x:Name="CandidatesListBox"
-                             Grid.Row="3"
-                             Background="#0D1017"
-                             Foreground="#E5E7EB"
-                             BorderBrush="#262C3D"
-                             FontFamily="Consolas"
-                             FontSize="11.5"
-                             Margin="0,0,0,10" />
-
-                    <Grid Grid.Row="4">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock x:Name="LearnStatusText" Text="Cihaz seçip mevcut pil yüzdesini girin." Foreground="#9CA3AF" FontSize="11.5" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,10,0" />
-                        <Button x:Name="SaveLearnedBtn" Grid.Column="1" Content="Seçili Adayı Kalıcı Kaydet" Style="{StaticResource AccentButton}" Click="SaveLearned_Click" IsEnabled="False" />
-                    </Grid>
-                </Grid>
-            </TabItem>
-
-            <TabItem Header="Cihaz Yönetimi">
-                <Grid Margin="4">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-
-                    <TextBlock Text="Gizlenen / Kaldırılan Cihazlar (kart üzerinden sağ tıkla gizlenenler):" Foreground="#D1D5DB" FontSize="12" Margin="0,0,0,6" />
-                    <ListBox x:Name="HiddenDevicesListBox"
-                             Grid.Row="1"
-                             Background="#0D1017"
-                             Foreground="#E5E7EB"
-                             BorderBrush="#262C3D"
-                             FontSize="12"
-                             Margin="0,0,0,8" />
-
-                    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,14">
-                        <Button Content="Seçiliyi Geri Getir" Style="{StaticResource DarkButton}" Click="UnhideSelected_Click" Margin="0,0,8,0" />
-                        <Button Content="Tümünü Geri Getir" Style="{StaticResource DarkButton}" Click="UnhideAll_Click" />
-                    </StackPanel>
-
-                    <TextBlock Grid.Row="3" Text="Öğrenilen Özel Profiller (Auto-Learn JSON):" Foreground="#D1D5DB" FontSize="12" Margin="0,0,0,6" />
-                    <ListBox x:Name="SavedProfilesListBox"
-                             Grid.Row="4"
-                             Background="#0D1017"
-                             Foreground="#E5E7EB"
-                             BorderBrush="#262C3D"
-                             FontFamily="Consolas"
-                             FontSize="11.5"
-                             Margin="0,0,0,8" />
-
-                    <StackPanel Grid.Row="5" Orientation="Horizontal">
-                        <Button Content="Seçili Profili Sil" Style="{StaticResource DarkButton}" Click="DeleteProfile_Click" Margin="0,0,10,0" />
-                        <TextBlock x:Name="ManageStatusText" Foreground="#9CA3AF" FontSize="11.5" VerticalAlignment="Center" />
-                    </StackPanel>
-                </Grid>
-            </TabItem>
         </TabControl>
 
-        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
-            <Button Content="Kaydet" Style="{StaticResource AccentButton}" Click="Save_Click" Width="96" Margin="0,0,8,0" />
-            <Button Content="Kapat" Style="{StaticResource DarkButton}" Click="Close_Click" Width="84" />
-        </StackPanel>
+        <Grid Grid.Row="2" Margin="2,14,2,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Text="Not: Cihaz gizleme ve ekleme işlemleri anında uygulanır. Genel ayarlar için 'Ayarları Kaydet'e basın."
+                       Style="{StaticResource SubHintText}"
+                       VerticalAlignment="Center"
+                       Margin="0,0,12,0" />
+
+            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <Button Content="Ayarları Kaydet" Style="{StaticResource AccentButton}" Click="Save_Click" Width="136" Margin="0,0,8,0" />
+                <Button Content="Kapat" Style="{StaticResource DarkButton}" Click="Close_Click" Width="88" />
+            </StackPanel>
+        </Grid>
     </Grid>
 </Window>

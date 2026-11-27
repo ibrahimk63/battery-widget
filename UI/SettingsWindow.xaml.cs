@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using BatteryWidget.Models;
@@ -8,6 +9,15 @@ namespace BatteryWidget.UI;
 
 public partial class SettingsWindow : Window
 {
+    private sealed record ActiveDeviceDisplay(string Id, string Name, string PercentText, string ConnectionLabel, bool IsConnected)
+    {
+        public override string ToString()
+        {
+            string status = IsConnected ? ConnectionLabel : "Uyku / Bağlı değil";
+            return $"{Name} — {PercentText} ({status})";
+        }
+    }
+
     private sealed record HiddenItemDisplay(string Id, string Name)
     {
         public override string ToString() => $"{Name} ({Id})";
@@ -17,6 +27,9 @@ public partial class SettingsWindow : Window
     {
         public override string ToString() => FileName;
     }
+
+    private const string GitHubNewIssueUrl =
+        "https://github.com/ibrahimk63/battery-widget/issues/new?title=Desteklenmeyen+Cihaz+Raporu&body=Cihaz+Marka%2FModeli%3A+%0A%0ATan%C4%B1lama+Raporu+%28Ctrl%2BV+ile+a%C5%9Fa%C4%9F%C4%B1ya+yap%C4%B1%C5%9Ft%C4%B1r%C4%B1n%29%3A%0A%60%60%60text%0A%0A%60%60%60";
 
     private static readonly int[] IntervalStepsSeconds = [10, 20, 30, 60, 120, 180, 300];
 
@@ -69,6 +82,9 @@ public partial class SettingsWindow : Window
 
     private void UpdateLabels()
     {
+        if (ThresholdValueText is null || IntervalValueText is null || OpacityValueText is null)
+            return;
+
         ThresholdValueText.Text = $"%{(int)ThresholdSlider.Value}";
         int idx = Math.Clamp((int)Math.Round(IntervalSlider.Value), 0, IntervalStepsSeconds.Length - 1);
         int sec = IntervalStepsSeconds[idx];
@@ -79,6 +95,7 @@ public partial class SettingsWindow : Window
     private void ScanHid_Click(object sender, RoutedEventArgs e)
     {
         HidReportBox.Text = HidDiagnosticService.GenerateHidReport();
+        DiagStatusText.Text = "Ham USB / HID listesi oluşturuldu.";
     }
 
     private async void UniversalScan_Click(object sender, RoutedEventArgs e)
@@ -89,6 +106,7 @@ public partial class SettingsWindow : Window
     private async Task RunUniversalDiagnosticsAsync(bool pollFirst)
     {
         UniversalScanBtn.IsEnabled = false;
+        DiagStatusText.Text = "Taranıyor...";
         HidReportBox.Text = "Bu bilgisayardaki tüm kablosuz, Bluetooth ve USB HID aygıtları taranıyor...";
         try
         {
@@ -97,10 +115,12 @@ public partial class SettingsWindow : Window
                 : _monitorService.CurrentDevices;
 
             HidReportBox.Text = await HidDiagnosticService.GenerateUniversalDiagnosticsAsync(devices);
+            DiagStatusText.Text = "Tarama tamamlandı.";
         }
         catch (Exception ex)
         {
             HidReportBox.Text = $"Tanılama hatası: {ex.Message}";
+            DiagStatusText.Text = $"Tanılama hatası: {ex.Message}";
         }
         finally
         {
@@ -110,7 +130,33 @@ public partial class SettingsWindow : Window
 
     private void CopyHid_Click(object sender, RoutedEventArgs e)
     {
+        if (string.IsNullOrWhiteSpace(HidReportBox.Text))
+        {
+            DiagStatusText.Text = "Kopyalanacak rapor yok. Önce 'Tüm Cihazları Tara'ya basın.";
+            return;
+        }
+
         System.Windows.Clipboard.SetText(HidReportBox.Text);
+        DiagStatusText.Text = "✓ Rapor panoya kopyalandı. İstediğiniz yere (GitHub/Discord/mesaj) Ctrl+V ile yapıştırabilirsiniz.";
+    }
+
+    private void ReportIssue_Click(object sender, RoutedEventArgs e)
+    {
+        bool hasReport = !string.IsNullOrWhiteSpace(HidReportBox.Text);
+        if (hasReport)
+            System.Windows.Clipboard.SetText(HidReportBox.Text);
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(GitHubNewIssueUrl) { UseShellExecute = true });
+            DiagStatusText.Text = hasReport
+                ? "✓ Rapor panoya kopyalandı ve GitHub destek sayfası açıldı! Açılan kutuya Ctrl+V ile yapıştırıp gönderin."
+                : "GitHub destek sayfası açıldı. Önce 'Tüm Cihazları Tara'ya basıp raporu kopyalayabilirsiniz.";
+        }
+        catch (Exception ex)
+        {
+            DiagStatusText.Text = $"Tarayıcı açılamadı: {ex.Message}";
+        }
     }
 
     private void LoadLearnableDevices()
@@ -141,7 +187,7 @@ public partial class SettingsWindow : Window
     {
         if (LearnDeviceCombo.SelectedItem is not LearnableDeviceItem selected)
         {
-            LearnStatusText.Text = "Lütfen önce listeden bir cihaz seçin.";
+            LearnStatusText.Text = "Lütfen önce Adım 1'den bir cihaz seçin.";
             return;
         }
 
@@ -173,12 +219,12 @@ public partial class SettingsWindow : Window
                 SaveLearnedBtn.IsEnabled = true;
                 RefineCandidatesBtn.IsEnabled = true;
                 LearnStatusText.Text = _currentCandidates.Count == 1
-                    ? "Tek kesin aday bulundu! 'Seçili Adayı Kalıcı Kaydet' ile kaydedebilirsiniz."
-                    : $"{_currentCandidates.Count} aday bulundu. Şarj %1 değişince yeni değeri yazıp '2. Daralt'a basabilir veya doğrudan kaydedebilirsiniz.";
+                    ? "Tek kesin sonuç bulundu! 'Cihazı Kaydet ve Ekle' ile kaydedebilirsiniz."
+                    : $"{_currentCandidates.Count} sonuç bulundu. Şarj %1 değişince yeni değeri yazıp '2. Sonucu Doğrula'ya basabilir veya doğrudan 'Cihazı Kaydet ve Ekle' ile kaydedebilirsiniz.";
             }
             else
             {
-                LearnStatusText.Text = "Eşleşen aday bulunamadı. Cihazın açık/aktif olduğundan ve pil yüzdesinin doğru olduğundan emin olun.";
+                LearnStatusText.Text = "Eşleşen sonuç bulunamadı. Cihazın açık/aktif olduğundan ve pil yüzdesinin doğru olduğundan emin olun.";
             }
         }
         catch (Exception ex)
@@ -195,19 +241,23 @@ public partial class SettingsWindow : Window
     {
         if (CandidatesListBox.SelectedItem is not LearnedCandidate candidate)
         {
-            LearnStatusText.Text = "Lütfen listeden bir aday seçin.";
+            LearnStatusText.Text = "Lütfen Adım 3 listesinden bir sonuç seçin.";
             return;
         }
 
         var category = BluetoothBatteryProvider.GuessCategory(candidate.DeviceName);
         string savedPath = AutoLearnService.SaveLearnedProfile(candidate, candidate.DeviceName, category);
-        LearnStatusText.Text = $"Kaydedildi: {savedPath}";
+        LearnStatusText.Text = $"Kaydedildi: {Path.GetFileName(savedPath)}";
         LoadDeviceManagementLists();
         _ = _monitorService.PollNowAsync();
     }
 
     private void LoadDeviceManagementLists()
     {
+        ActiveDevicesListBox.ItemsSource = _monitorService.CurrentDevices
+            .Select(d => new ActiveDeviceDisplay(d.Id, d.Name, d.PercentText, d.ConnectionLabel, d.IsConnected))
+            .ToList();
+
         HiddenDevicesListBox.ItemsSource = _settings.HiddenDevices
             .Select(h => new HiddenItemDisplay(h.Id, string.IsNullOrWhiteSpace(h.Name) ? h.Id : h.Name))
             .ToList();
@@ -220,6 +270,39 @@ public partial class SettingsWindow : Window
                 profiles.Add(new ProfileFileDisplay(Path.GetFileName(file), file));
         }
         SavedProfilesListBox.ItemsSource = profiles;
+    }
+
+    private void HideActiveDevice_Click(object sender, RoutedEventArgs e)
+    {
+        if (ActiveDevicesListBox.SelectedItem is not ActiveDeviceDisplay item)
+        {
+            ManageStatusText.Text = "Gizlemek için aktif cihaz listesinden bir cihaz seçin.";
+            return;
+        }
+
+        _monitorService.HideDevice(item.Id, item.Name);
+        LoadDeviceManagementLists();
+        ManageStatusText.Text = $"{item.Name} widget ekranından gizlendi.";
+    }
+
+    private async void RefreshActiveDevices_Click(object sender, RoutedEventArgs e)
+    {
+        RefreshActiveBtn.IsEnabled = false;
+        ManageStatusText.Text = "Cihazlar yenileniyor...";
+        try
+        {
+            await _monitorService.PollNowAsync();
+            LoadDeviceManagementLists();
+            ManageStatusText.Text = "Cihaz listesi güncellendi.";
+        }
+        catch (Exception ex)
+        {
+            ManageStatusText.Text = $"Yenileme hatası: {ex.Message}";
+        }
+        finally
+        {
+            RefreshActiveBtn.IsEnabled = true;
+        }
     }
 
     private void UnhideSelected_Click(object sender, RoutedEventArgs e)
@@ -246,7 +329,7 @@ public partial class SettingsWindow : Window
     {
         if (SavedProfilesListBox.SelectedItem is not ProfileFileDisplay item)
         {
-            ManageStatusText.Text = "Silmek için profil listesinden bir dosya seçin.";
+            ManageStatusText.Text = "Silmek için kayıt listesinden bir dosya seçin.";
             return;
         }
 
