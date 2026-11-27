@@ -152,7 +152,7 @@ public static class AutoLearnService
                         int outLen = device.GetMaxOutputReportLength();
                         if (outLen >= 8 && inLen >= 4 && desc.OutputReports.Any())
                         {
-                            byte[] opcodes = [0x04, 0x02, 0x05, 0x06, 0x18, 0x80, 0x89];
+                            byte[] opcodes = [0x04, 0x02, 0x05, 0x06, 0x18, 0x1A, 0x30, 0x65, 0x7D, 0x80, 0x83, 0x89];
                             foreach (var outRep in desc.OutputReports)
                             {
                                 foreach (byte op in opcodes)

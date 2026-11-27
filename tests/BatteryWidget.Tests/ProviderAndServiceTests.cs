@@ -464,4 +464,53 @@ public class ProviderAndServiceTests
         var restored = BatteryMonitorService.FilterHiddenDevices(devices, hidden);
         Assert.Equal(2, restored.Count);
     }
+
+    [Fact]
+    public void UniversalCompx_ParseCompxResponse_FallsBackToVoltageForVxeR1SePlus()
+    {
+        // byte[6] == 0, voltage 3900 mV (0x0F3C) -> (3900-3300)/900 = 67%
+        var pkt = new byte[17];
+        pkt[0] = 0x08;
+        pkt[1] = 0x04;
+        pkt[6] = 0x00;
+        pkt[7] = 0x00;
+        pkt[8] = 0x0F;
+        pkt[9] = 0x3C;
+        var res = UniversalCompxProvider.ParseCompxResponse(pkt);
+        Assert.NotNull(res);
+        Assert.Equal(67, res.Value.Percent);
+        Assert.False(res.Value.IsCharging);
+    }
+
+    [Fact]
+    public void WraithEcosystem_ParsesWlmouseEvisionAndHechiResponses()
+    {
+        var wlm = new byte[65];
+        wlm[6] = 0x83;
+        wlm[7] = 1; // charging
+        wlm[8] = 82;
+        var resWlm = WraithEcosystemProvider.ParseWlmouseFeatureResponse(wlm);
+        Assert.NotNull(resWlm);
+        Assert.Equal(82, resWlm.Value.Percent);
+        Assert.True(resWlm.Value.IsCharging);
+
+        var evi = new byte[64];
+        evi[0] = 0x05;
+        evi[3] = 0x1A;
+        evi[7] = 58;
+        evi[8] = 0;
+        var resEvi = WraithEcosystemProvider.ParseEvisionBatteryResponse(evi);
+        Assert.NotNull(resEvi);
+        Assert.Equal(58, resEvi.Value.Percent);
+        Assert.False(resEvi.Value.IsCharging);
+
+        var hechi = new byte[64];
+        hechi[0] = 0x0B;
+        hechi[14] = 1; // charging
+        hechi[15] = 77;
+        var resHechi = WraithEcosystemProvider.ParseHechiBatteryResponse(hechi);
+        Assert.NotNull(resHechi);
+        Assert.Equal(77, resHechi.Value.Percent);
+        Assert.True(resHechi.Value.IsCharging);
+    }
 }

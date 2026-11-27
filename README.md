@@ -13,7 +13,7 @@ Bilgisayarınızda .NET kurulu olmasına gerek yoktur; tek dosyayı indirip doğ
 
 - **HyperX Cloud III Wireless** (`0x03F0:0x05B7` / `0x0FCC` / `0x098D`) — 62-byte USB HID kontrol kanalı (`0x66 / 0x89` & `0x66 / 0x8A`)
 - **Darmoshark M3 V2 & Realtek 2.4GHz** (`0x0BDA:0xFFE0` / `0xFFEA` ve `0xB5`/`0xB6` destekleyen tüm Realtek alıcıları)
-- **Monster Pusat Ghost Pro, Throne Repel 8K (PAW3950 8K), VXE, ATK, VGN, Attack Shark, Ajazz vb. (Evrensel CompX/Beken/PAW3950)** — Report ID `0x08` ve `0x00` destekleyen tüm 2.4GHz / 8K kablosuz fare ve aygıtları otomatik algılar
+- **Wraith Ekosistemi & Evrensel CompX/PAW3950 (`v1.0.5`)** — VXE R1 SE+ / R1+ / R1 Pro / Mad R (voltaj fallback dahil), WLMouse (`0x36A7` Beast X vb.), Lamzu, Scyrox, MCHOSE, Ninjutso, ATK, VGN, Monster Pusat Ghost Pro, Throne Repel 8K, Evision/NearLink 8K (`0x05`), Hechi 8K (`0x0B`) ve HFD kablosuz klavyeler
 - **Logitech (HID++ 2.0)** — Lightspeed, Bolt ve Unifying alıcılı tüm Logitech kablosuz fare/klavye/kulaklıklar (`0x1004` / `0x1000`)
 - **Razer Wireless** — 90-byte Feature Report protokolüyle kablosuz Razer fare, klavye ve kulaklıklar
 - **SteelSeries & ATK N9 Serisi** — Arctis / Arctis Nova kulaklıklar (`0x1038`), ATK N9 Pro / Ultra (`9600-baud USB Serial` protokolü) ve ATK N9 V2 (`Bolutek HID 0x55/0x65`)
@@ -22,6 +22,11 @@ Bilgisayarınızda .NET kurulu olmasına gerek yoktur; tek dosyayı indirip doğ
 - **Standart USB/HID Pil Aygıtları** — Standart HID pil raporu sunan diğer harici kablosuz cihazları otomatik algılar (dizüstü bilgisayarın dahili pilini hariç tutar)
 - **Evrensel HID Parmak İzi Motoru** — Markadan bağımsız olarak Rapoo / 8K fareler (`0x07` 19B Input), Hechi 8K (`0x0B`), Standart HID Input+Feature pil raporlarını descriptor parmak iziyle otomatik tanır
 - **Cihaz Öğret (Auto-Learn Sihirbazı) & Cihaz Kaldırma/Yönetimi** — Kartlara sağ tıklayarak istenmeyen cihazları kaldırıp gizleyebilir, Ayarlar → Cihaz Yönetimi sekmesinden geri getirebilir ve öğrenilen profilleri silebilirsiniz
+
+## Sıkça Sorulan Sorular
+
+- **Farenin 1000Hz / 4000Hz / 8000Hz kullanması CPU kullanımını artırır mı?**
+  Hayır. Fare hareket verisi ayrı bir USB kanalından akar; BatteryWidget hareket paketlerini dinlemez, yalnızca seçilen tarama aralığında (ör. 1 dakikada bir) ayrı kontrol kanalından tek bir pil sorgusu okur.
 - **Genel Aygıt Tanılama**: Ayarlar → Aygıt Tanılama sekmesinden her bilgisayarın kendi bağlı USB HID, Report ID ve sanal COM portlarını tek tıkla tarama
 
 ## Özellikler

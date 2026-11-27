@@ -12,7 +12,7 @@ namespace BatteryWidget.Providers;
 /// </summary>
 public sealed class GenericHidBatteryProvider : IBatteryProvider
 {
-    private static readonly HashSet<int> DedicatedVendorIds = [0x03F0, 0x0BDA, 0x054C, 0x046D, 0x1532, 0x1038];
+    private static readonly HashSet<int> DedicatedVendorIds = [0x03F0, 0x0BDA, 0x054C, 0x046D, 0x1532, 0x1038, 0x36A7];
     private const uint UsageBatteryStrength = 0x00060020;       // Generic Device Controls -> Battery Strength
     private const uint UsageAbsoluteSoc = 0x00850065;           // Battery System -> Absolute State of Charge
     private const uint UsageRemainingCapacity = 0x00850066;     // Battery System -> Remaining Capacity
