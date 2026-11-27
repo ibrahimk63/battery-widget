@@ -123,11 +123,12 @@ jobs:
           git push origin main
 
       - name: Notify Discord on auto-merged profile
-        if: steps.resolve.outputs.db_updated == 'true' && secrets.DISCORD_WEBHOOK_URL != ''
+        if: steps.resolve.outputs.db_updated == 'true'
         shell: pwsh
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
+          if ([string]::IsNullOrWhiteSpace($env:DISCORD_WEBHOOK_URL)) { return }
           $outPath = Join-Path $env:RUNNER_TEMP "resolve-result.json"
           $res = Get-Content -LiteralPath $outPath -Raw | ConvertFrom-Json
           $lines = $res.resolved | ForEach-Object { "• **$($_.profile.name)** (\`$($_.vid):$($_.pid)\`) — Aile: $($_.family)" }
