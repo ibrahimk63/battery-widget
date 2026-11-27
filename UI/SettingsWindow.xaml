@@ -134,7 +134,7 @@
                 </StackPanel>
             </TabItem>
 
-            <TabItem Header="HID Tanılama &amp; Paket Testi">
+            <TabItem Header="Aygıt Tanılama">
                 <Grid Margin="4">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
@@ -142,8 +142,8 @@
                     </Grid.RowDefinitions>
 
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                        <Button Content="HID Listele" Style="{StaticResource DarkButton}" Click="ScanHid_Click" Margin="0,0,8,0" />
-                        <Button Content="Paket Testi (HyperX/Darmoshark)" Style="{StaticResource DarkButton}" Click="ProbeHid_Click" Margin="0,0,8,0" />
+                        <Button x:Name="UniversalScanBtn" Content="Tüm Aygıtları Tara &amp; Tanıla" Style="{StaticResource DarkButton}" Click="UniversalScan_Click" Margin="0,0,8,0" />
+                        <Button Content="Ham HID Listesi" Style="{StaticResource DarkButton}" Click="ScanHid_Click" Margin="0,0,8,0" />
                         <Button Content="Kopyala" Style="{StaticResource DarkButton}" Click="CopyHid_Click" />
                     </StackPanel>
 

@@ -247,4 +247,85 @@ public class ProviderAndServiceTests
         Assert.Equal(72, list[0].BatteryPercent);
         Assert.Equal(ConnectionKind.Bluetooth, list[0].Connection);
     }
+
+    [Fact]
+    public void UniversalCompx_ParseCompxResponse_Parses17ByteAnd64ByteFormats()
+    {
+        var resp17 = new byte[17];
+        resp17[0] = 0x08;
+        resp17[1] = 0x04;
+        resp17[6] = 85;
+        resp17[7] = 1; // charging
+        var res17 = UniversalCompxProvider.ParseCompxResponse(resp17);
+        Assert.NotNull(res17);
+        Assert.Equal(85, res17.Value.Percent);
+        Assert.True(res17.Value.IsCharging);
+
+        var resp64 = new byte[64];
+        resp64[0] = 0x08;
+        resp64[1] = 0x72;
+        resp64[6] = 63;
+        resp64[7] = 0;
+        var res64 = UniversalCompxProvider.ParseCompxResponse(resp64);
+        Assert.NotNull(res64);
+        Assert.Equal(63, res64.Value.Percent);
+        Assert.False(res64.Value.IsCharging);
+    }
+
+    [Fact]
+    public void LogitechHidpp_ParseHidppBatteryResponse_ParsesUnifiedAndLegacy()
+    {
+        var unified = new byte[20];
+        unified[0] = 0x11;
+        unified[4] = 90;
+        unified[6] = 1; // recharging
+        var resUnified = LogitechHidppProvider.ParseHidppBatteryResponse(unified, isUnified: true);
+        Assert.NotNull(resUnified);
+        Assert.Equal(90, resUnified.Value.Percent);
+        Assert.True(resUnified.Value.IsCharging);
+
+        var legacy = new byte[20];
+        legacy[0] = 0x11;
+        legacy[4] = 45;
+        legacy[5] = 0; // discharging
+        var resLegacy = LogitechHidppProvider.ParseHidppBatteryResponse(legacy, isUnified: false);
+        Assert.NotNull(resLegacy);
+        Assert.Equal(45, resLegacy.Value.Percent);
+        Assert.False(resLegacy.Value.IsCharging);
+    }
+
+    [Fact]
+    public void Razer_ComputeChecksumAndParseBatteryPercent_WorksCorrectly()
+    {
+        var payload = new byte[90];
+        payload[0] = 0x00;
+        payload[1] = 0x1F;
+        payload[5] = 0x02;
+        payload[6] = 0x07;
+        payload[7] = 0x80;
+        byte crc = RazerBatteryProvider.ComputeRazerChecksum(payload);
+        Assert.Equal(0x02 ^ 0x07 ^ 0x80, crc);
+
+        var resp = new byte[90];
+        resp[0] = 0x02;
+        resp[9] = 128; // ~50% of 255
+        var pct = RazerBatteryProvider.ParseRazerBatteryPercent(resp);
+        Assert.Equal(50, pct);
+    }
+
+    [Fact]
+    public void HeadsetVendors_ParseSteelSeriesResponse_ParsesNovaAndArctis7()
+    {
+        var nova = new byte[] { 0x06, 0x18, 75, 0x01 };
+        var resNova = HeadsetVendorsProvider.ParseSteelSeriesResponse(nova);
+        Assert.NotNull(resNova);
+        Assert.Equal(75, resNova.Value.Percent);
+        Assert.True(resNova.Value.IsCharging);
+
+        var arctis7 = new byte[] { 0xB0, 0x00, 60, 0x00 };
+        var resA7 = HeadsetVendorsProvider.ParseSteelSeriesResponse(arctis7);
+        Assert.NotNull(resA7);
+        Assert.Equal(60, resA7.Value.Percent);
+        Assert.False(resA7.Value.IsCharging);
+    }
 }

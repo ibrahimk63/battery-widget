@@ -1,6 +1,7 @@
 using System.Text;
-using BatteryWidget.Providers;
+using BatteryWidget.Models;
 using HidSharp;
+using Microsoft.Win32;
 
 namespace BatteryWidget.Services;
 
@@ -33,75 +34,100 @@ public static class HidDiagnosticService
         return sb.ToString();
     }
 
-    public static string ProbeKnownDevices()
+    public static Task<string> GenerateUniversalDiagnosticsAsync(IReadOnlyList<DeviceBatteryInfo> activeDevices)
     {
-        var sb = new StringBuilder();
-        sb.AppendLine("=== HyperX (0x03F0:0x05B7) & Darmoshark (0x0BDA:0xFFE0) Paket Testi ===");
-
-        // HyperX 62-byte probe
-        var hx = DeviceList.Local.GetHidDevices(0x03F0, 0x05B7)
-            .FirstOrDefault(d => d.GetMaxOutputReportLength() == 62);
-        if (hx is not null)
+        return Task.Run(() =>
         {
-            sb.AppendLine("[HyperX 0x03F0:0x05B7] 62-byte arayüz bulundu.");
-            var resp = TryProbeOutput(hx, [0x66, 0x89], sb);
-            if (resp is not null)
+            var sb = new StringBuilder();
+            sb.AppendLine("=== 1. ALGILANAN AKTİF AYGITLAR ===");
+            if (activeDevices.Count == 0)
             {
-                var parsed = HyperXCloud3Provider.ParseBatteryResponse(resp);
-                if (parsed.HasValue)
-                    sb.AppendLine($"  => Çözümlenen Pil: %{parsed.Value.Percent} (Şarj: {parsed.Value.IsCharging})");
+                sb.AppendLine("Şu anda algılanan pil bildiren aygıt yok.");
             }
-        }
-
-        // Darmoshark 64-byte probe
-        var dm = DeviceList.Local.GetHidDevices(0x0BDA, 0xFFE0)
-            .FirstOrDefault(d => d.GetMaxOutputReportLength() == 64 && d.GetMaxInputReportLength() == 64);
-        if (dm is not null)
-        {
-            sb.AppendLine("[Darmoshark 0x0BDA:0xFFE0] 64-byte kontrol arayüzü bulundu.");
-            var resp = TryProbeOutput(dm, [0xB5, 0x05], sb);
-            if (resp is not null)
+            else
             {
-                var parsed = DarmosharkM3V2Provider.ParseBatteryResponse(resp);
-                if (parsed.HasValue)
-                    sb.AppendLine($"  => Çözümlenen Pil: %{parsed.Value.Percent} (Şarj: {parsed.Value.IsCharging})");
+                foreach (var dev in activeDevices)
+                {
+                    string state = dev.IsConnected ? (dev.IsCharging ? "Şarj Oluyor" : "Bağlı") : (dev.StatusNote ?? "Bağlı Değil");
+                    sb.AppendLine($"- {dev.Name} [{dev.ConnectionLabel}] -> {dev.PercentText} ({state}) | ID: {dev.Id}");
+                }
             }
-        }
-        else
-        {
-            sb.AppendLine("[Darmoshark 0x0BDA:0xFFE0] 64-byte kontrol arayüzü bulunamadı.");
-        }
 
-        return sb.ToString();
-    }
+            sb.AppendLine();
+            sb.AppendLine("=== 2. BU BİLGİSAYARDAKİ VENDOR USB / 2.4GHz HID AYGITLARI ===");
+            var vendorGroups = DeviceList.Local.GetHidDevices()
+                .Where(d => d.VendorID > 0 && (d.GetMaxOutputReportLength() >= 8 || d.GetMaxFeatureReportLength() >= 8))
+                .GroupBy(d => (d.VendorID, d.ProductID))
+                .OrderBy(g => g.Key.VendorID)
+                .ThenBy(g => g.Key.ProductID)
+                .ToList();
 
-    private static byte[]? TryProbeOutput(HidDevice dev, byte[] cmd, StringBuilder sb)
-    {
-        try
-        {
-            if (!dev.TryOpen(out var stream))
+            if (vendorGroups.Count == 0)
             {
-                sb.AppendLine($"  Komut {BitConverter.ToString(cmd)}: Açılamadı.");
-                return null;
+                sb.AppendLine("Özel kontrol kanalı olan USB HID aygıtı bulunamadı.");
             }
-            using (stream)
+            else
             {
-                stream.ReadTimeout = 400;
-                stream.WriteTimeout = 400;
-                var outBuf = new byte[dev.GetMaxOutputReportLength()];
-                Array.Copy(cmd, outBuf, Math.Min(cmd.Length, outBuf.Length));
-                stream.Write(outBuf, 0, outBuf.Length);
+                foreach (var group in vendorGroups)
+                {
+                    string name = "(Bilinmiyor)";
+                    foreach (var d in group)
+                    {
+                        try
+                        {
+                            var n = d.GetProductName();
+                            if (!string.IsNullOrWhiteSpace(n)) { name = n.Trim(); break; }
+                        }
+                        catch { /* ignore */ }
+                    }
 
-                var inBuf = new byte[dev.GetMaxInputReportLength()];
-                int read = stream.Read(inBuf, 0, inBuf.Length);
-                sb.AppendLine($"  Komut {BitConverter.ToString(cmd)} -> Yanıt ({read}B): {BitConverter.ToString(inBuf, 0, Math.Min(read, 24))}");
-                return inBuf[..read];
+                    sb.AppendLine($"[0x{group.Key.VendorID:X4}:0x{group.Key.ProductID:X4}] {name}");
+                    foreach (var d in group)
+                    {
+                        sb.AppendLine($"  Arayüz -> In:{d.GetMaxInputReportLength()} Out:{d.GetMaxOutputReportLength()} Feat:{d.GetMaxFeatureReportLength()}");
+                        try
+                        {
+                            var desc = d.GetReportDescriptor();
+                            var inIds = desc.InputReports.Select(r => $"0x{r.ReportID:X2}({r.Length}B)").ToList();
+                            var outIds = desc.OutputReports.Select(r => $"0x{r.ReportID:X2}({r.Length}B)").ToList();
+                            var featIds = desc.FeatureReports.Select(r => $"0x{r.ReportID:X2}({r.Length}B)").ToList();
+
+                            if (inIds.Count > 0) sb.AppendLine($"    In IDs  : {string.Join(", ", inIds)}");
+                            if (outIds.Count > 0) sb.AppendLine($"    Out IDs : {string.Join(", ", outIds)}");
+                            if (featIds.Count > 0) sb.AppendLine($"    Feat IDs: {string.Join(", ", featIds)}");
+                        }
+                        catch
+                        {
+                            sb.AppendLine("    Descriptor okunamadı.");
+                        }
+                    }
+                }
             }
-        }
-        catch (Exception ex)
-        {
-            sb.AppendLine($"  Komut {BitConverter.ToString(cmd)} -> Hata: {ex.Message}");
-            return null;
-        }
+
+            sb.AppendLine();
+            sb.AppendLine("=== 3. USB SERİ / SANAL COM PORTLARI ===");
+            try
+            {
+                using var key = Registry.LocalMachine.OpenSubKey(@"HARDWARE\DEVICEMAP\SERIALCOMM");
+                if (key is null || key.ValueCount == 0)
+                {
+                    sb.AppendLine("Aktif sanal COM portu bulunamadı.");
+                }
+                else
+                {
+                    foreach (var valName in key.GetValueNames())
+                    {
+                        var com = key.GetValue(valName)?.ToString();
+                        sb.AppendLine($"- {com} ({valName})");
+                    }
+                }
+            }
+            catch
+            {
+                sb.AppendLine("COM port listesi okunamadı.");
+            }
+
+            return sb.ToString();
+        });
     }
 }

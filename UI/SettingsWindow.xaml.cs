@@ -9,12 +9,14 @@ public partial class SettingsWindow : Window
     private static readonly int[] IntervalStepsSeconds = [10, 20, 30, 60, 120, 180, 300];
 
     private readonly AppSettings _settings;
+    private readonly BatteryMonitorService _monitorService;
     private readonly Action _onSaved;
 
-    public SettingsWindow(AppSettings settings, Action onSaved)
+    public SettingsWindow(AppSettings settings, BatteryMonitorService monitorService, Action onSaved)
     {
         InitializeComponent();
         _settings = settings;
+        _monitorService = monitorService;
         _onSaved = onSaved;
 
         AlwaysOnTopCheck.IsChecked = _settings.AlwaysOnTop;
@@ -25,7 +27,7 @@ public partial class SettingsWindow : Window
         OpacitySlider.Value = _settings.Opacity;
 
         UpdateLabels();
-        HidReportBox.Text = HidDiagnosticService.GenerateHidReport();
+        _ = RunUniversalDiagnosticsAsync(pollFirst: false);
     }
 
     private static int FindNearestStepIndex(int seconds)
@@ -64,9 +66,31 @@ public partial class SettingsWindow : Window
         HidReportBox.Text = HidDiagnosticService.GenerateHidReport();
     }
 
-    private void ProbeHid_Click(object sender, RoutedEventArgs e)
+    private async void UniversalScan_Click(object sender, RoutedEventArgs e)
     {
-        HidReportBox.Text = HidDiagnosticService.ProbeKnownDevices();
+        await RunUniversalDiagnosticsAsync(pollFirst: true);
+    }
+
+    private async Task RunUniversalDiagnosticsAsync(bool pollFirst)
+    {
+        UniversalScanBtn.IsEnabled = false;
+        HidReportBox.Text = "Bu bilgisayardaki tüm kablosuz, Bluetooth ve USB HID aygıtları taranıyor...";
+        try
+        {
+            var devices = pollFirst
+                ? await _monitorService.PollNowAsync()
+                : _monitorService.CurrentDevices;
+
+            HidReportBox.Text = await HidDiagnosticService.GenerateUniversalDiagnosticsAsync(devices);
+        }
+        catch (Exception ex)
+        {
+            HidReportBox.Text = $"Tanılama hatası: {ex.Message}";
+        }
+        finally
+        {
+            UniversalScanBtn.IsEnabled = true;
+        }
     }
 
     private void CopyHid_Click(object sender, RoutedEventArgs e)

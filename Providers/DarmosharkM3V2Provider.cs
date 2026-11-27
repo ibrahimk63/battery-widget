@@ -1,12 +1,13 @@
+using System.Collections.Concurrent;
 using BatteryWidget.Models;
 using HidSharp;
 
 namespace BatteryWidget.Providers;
 
 /// <summary>
-/// Reads battery status from Darmoshark M3 V2 (VID 0x0BDA / PID 0xFFE0, 2.4GHz receiver)
-/// using the official Darmoshark Launcher WebHID protocol:
-/// Output Report 0xB5, cmd 0x05 (or 0x06) -> Input Report 0xB6/0xB4, byte[20]: bit7 = charging, bits6..0 = percent.
+/// Reads battery status from Darmoshark M3 V2 (VID 0x0BDA / PID 0xFFE0, 0xFFEA)
+/// AND aggressively auto-discovers any Realtek-based 2.4GHz peripheral whose HID descriptor
+/// exposes 64-byte Output Report ID 0xB5 and Input Report ID 0xB6/0xB4.
 /// </summary>
 public sealed class DarmosharkM3V2Provider : IBatteryProvider
 {
@@ -19,16 +20,26 @@ public sealed class DarmosharkM3V2Provider : IBatteryProvider
     ];
 
     public static readonly int[] KnownVendorIds = [0x0BDA, 0x3554, 0x248A, 0x1EA7, 0x373B];
+    private readonly ConcurrentDictionary<string, bool> _realtekB5Cache = new(StringComparer.OrdinalIgnoreCase);
 
-    public string ProviderName => "Darmoshark M3 V2";
+    public string ProviderName => "Realtek / Darmoshark 2.4GHz HID";
 
     public Task<IReadOnlyList<DeviceBatteryInfo>> PollDevicesAsync(CancellationToken cancellationToken = default)
     {
         return Task.Run<IReadOnlyList<DeviceBatteryInfo>>(() =>
         {
             var results = new List<DeviceBatteryInfo>();
-            var candidates = DeviceList.Local.GetHidDevices()
-                .Where(IsDarmosharkDevice)
+            var allDevices = DeviceList.Local.GetHidDevices().Where(d => d.VendorID > 0).ToList();
+
+            var activePaths = new HashSet<string>(allDevices.Select(d => d.DevicePath), StringComparer.OrdinalIgnoreCase);
+            foreach (var key in _realtekB5Cache.Keys)
+            {
+                if (!activePaths.Contains(key))
+                    _realtekB5Cache.TryRemove(key, out _);
+            }
+
+            var candidates = allDevices
+                .Where(d => IsDarmosharkDevice(d) || IsRealtekB5Capable(d))
                 .OrderByDescending(d => d.GetMaxOutputReportLength() == 64 && d.GetMaxInputReportLength() == 64)
                 .ThenByDescending(d => d.GetMaxOutputReportLength())
                 .ToList();
@@ -36,33 +47,63 @@ public sealed class DarmosharkM3V2Provider : IBatteryProvider
             if (candidates.Count == 0)
                 return results;
 
-            foreach (var device in candidates)
+            var seenGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var group in candidates.GroupBy(d => $"{d.VendorID:X4}:{d.ProductID:X4}"))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var parsed = TryQueryDevice(device);
+                DeviceBatteryInfo? parsed = null;
+
+                foreach (var device in group)
+                {
+                    parsed = TryQueryDevice(device);
+                    if (parsed is not null)
+                        break;
+                }
+
                 if (parsed is not null)
                 {
+                    seenGroups.Add(group.Key);
                     results.Add(parsed);
-                    break;
                 }
-            }
-
-            if (results.Count == 0 && candidates.Count > 0)
-            {
-                results.Add(new DeviceBatteryInfo
+                else if (KnownPairs.Any(p => $"{p.Vid:X4}:{p.Pid:X4}" == group.Key))
                 {
-                    Id = $"darmoshark-{candidates[0].VendorID:X4}-{candidates[0].ProductID:X4}",
-                    Name = GetDisplayName(candidates[0]),
-                    Category = DeviceCategory.Mouse,
-                    Connection = ConnectionKind.Wireless24Ghz,
-                    BatteryPercent = -1,
-                    IsConnected = false,
-                    StatusNote = "Uyku"
-                });
+                    var first = group.First();
+                    results.Add(new DeviceBatteryInfo
+                    {
+                        Id = $"darmoshark-{first.VendorID:X4}-{first.ProductID:X4}",
+                        Name = GetDisplayName(first),
+                        Category = DeviceCategory.Mouse,
+                        Connection = ConnectionKind.Wireless24Ghz,
+                        BatteryPercent = -1,
+                        IsConnected = false,
+                        StatusNote = "Uyku"
+                    });
+                }
             }
 
             return results;
         }, cancellationToken);
+    }
+
+    private bool IsRealtekB5Capable(HidDevice device)
+    {
+        if (device.GetMaxOutputReportLength() != 64 || device.GetMaxInputReportLength() != 64)
+            return false;
+
+        return _realtekB5Cache.GetOrAdd(device.DevicePath, _ =>
+        {
+            try
+            {
+                var desc = device.GetReportDescriptor();
+                bool hasOutB5 = desc.OutputReports.Any(r => r.ReportID == 0xB5);
+                bool hasInB6OrB4 = desc.InputReports.Any(r => r.ReportID == 0xB6 || r.ReportID == 0xB4);
+                return hasOutB5 && hasInB6OrB4;
+            }
+            catch
+            {
+                return false;
+            }
+        });
     }
 
     private static bool IsDarmosharkDevice(HidDevice device)
@@ -97,12 +138,10 @@ public sealed class DarmosharkM3V2Provider : IBatteryProvider
                 stream.ReadTimeout = 500;
                 stream.WriteTimeout = 500;
 
-                // Official Darmoshark Launcher getBaseInfo(): Report ID 0xB5 (181), cmd 0x05 -> if gears > 5, cmd 0x06
-                var parsed = QueryCommand(stream, 0xB5, 0x05);
-                if (parsed is null)
-                    parsed = QueryCommand(stream, 0xB5, 0x06);
-                if (parsed is null)
-                    parsed = QueryCommand(stream, 0xB3, 0x05);
+                // Official Darmoshark/Realtek getBaseInfo(): Report ID 0xB5 (181), cmd 0x05 -> cmd 0x06
+                var parsed = QueryCommand(stream, 0xB5, 0x05)
+                          ?? QueryCommand(stream, 0xB5, 0x06)
+                          ?? QueryCommand(stream, 0xB3, 0x05);
 
                 if (parsed.HasValue)
                     return BuildInfo(device, parsed.Value.Percent, parsed.Value.IsCharging);
@@ -124,7 +163,6 @@ public sealed class DarmosharkM3V2Provider : IBatteryProvider
         stream.Write(req, 0, req.Length);
 
         var resp = new byte[64];
-        // Read up to 3 packets in case an asynchronous event packet (0xE2) arrives first
         for (int attempt = 0; attempt < 3; attempt++)
         {
             int read = stream.Read(resp, 0, resp.Length);
@@ -140,13 +178,10 @@ public sealed class DarmosharkM3V2Provider : IBatteryProvider
     }
 
     /// <summary>
-    /// Parses Darmoshark M3 V2 Realtek 64-byte HID responses.
-    /// - Base info (0xB6/0xB4, cmd 0x05 or 0x06): byte[20] -> bit7 = charging, bits6..0 = percent (0..100).
-    /// - Live update event (0xB6/0xB4, cmd 0xE2): byte[4] = charging state, byte[5] = percent.
+    /// Parses Darmoshark M3 V2 / Realtek 64-byte HID responses.
     /// </summary>
     public static (int Percent, bool IsCharging)? ParseBatteryResponse(ReadOnlySpan<byte> data)
     {
-        // Pattern 1: Realtek 64-byte Base Info (Report ID 0xB6 or 0xB4, cmd 0x05 or 0x06)
         if (data.Length >= 21 && (data[0] == 0xB6 || data[0] == 0xB4) && (data[1] == 0x05 || data[1] == 0x06))
         {
             byte powerByte = data[20];
@@ -156,7 +191,6 @@ public sealed class DarmosharkM3V2Provider : IBatteryProvider
                 return (percent, isCharging);
         }
 
-        // Pattern 2: Live update event (CMD_MOUSE_ELE_MODE = 0xE2 / 226)
         if (data.Length >= 6 && (data[0] == 0xB6 || data[0] == 0xB4) && data[1] == 0xE2)
         {
             if (data[4] != 0xFF || data[5] != 0xFF)
@@ -167,7 +201,6 @@ public sealed class DarmosharkM3V2Provider : IBatteryProvider
             }
         }
 
-        // Pattern 3: Compx/Telink legacy format [0x08, 0x04, ..., percent at 6, charging at 7]
         if (data.Length >= 8 && data[0] == 0x08 && data[1] == 0x04)
         {
             int pct = data[6];
@@ -195,7 +228,12 @@ public sealed class DarmosharkM3V2Provider : IBatteryProvider
     private static string GetDisplayName(HidDevice device)
     {
         var raw = TryGetProductName(device);
-        return string.IsNullOrWhiteSpace(raw) ? "Darmoshark M3 V2" : raw;
+        if (!string.IsNullOrWhiteSpace(raw))
+            return raw;
+
+        return device.VendorID == 0x0BDA && (device.ProductID == 0xFFE0 || device.ProductID == 0xFFEA)
+            ? "Darmoshark M3 V2"
+            : $"Realtek Kablosuz ({device.VendorID:X4}:{device.ProductID:X4})";
     }
 
     private static string? TryGetProductName(HidDevice device)

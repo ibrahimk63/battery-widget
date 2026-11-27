@@ -34,6 +34,10 @@ public partial class App : System.Windows.Application
         {
             new HyperXCloud3Provider(),
             new DarmosharkM3V2Provider(),
+            new UniversalCompxProvider(),
+            new LogitechHidppProvider(),
+            new RazerBatteryProvider(),
+            new HeadsetVendorsProvider(),
             new GamepadBatteryProvider(),
             new BluetoothBatteryProvider(),
             new GenericHidBatteryProvider(),
@@ -75,7 +79,7 @@ public partial class App : System.Windows.Application
 
     private void OpenSettings()
     {
-        var win = new SettingsWindow(_settings, () =>
+        var win = new SettingsWindow(_settings, _monitorService, () =>
         {
             _settings.Save();
             StartupService.SetEnabled(_settings.StartWithWindows);
