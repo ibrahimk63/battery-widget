@@ -2,6 +2,13 @@
 
 Windows için kablosuz cihazlarınızın (2.4GHz USB dongle ve Bluetooth) pil yüzdelerini ve şarj durumlarını **tek bir masaüstü widget'ında ve Sistem Tepsisinde (System Tray)** gösteren hafif bir C# / .NET WPF uygulamasıdır.
 
+## Tek Tıkla İndir (Kurulumsuz)
+
+Bilgisayarınızda .NET kurulu olmasına gerek yoktur; tek dosyayı indirip doğrudan çalıştırabilirsiniz:
+
+- **[BatteryWidget.exe İndir (Windows x64 — Tek Dosya)](https://github.com/ibrahimk63/battery-widget/releases/latest/download/BatteryWidget.exe)**
+- **[Tüm Sürümler & ZIP Paketi (GitHub Releases)](https://github.com/ibrahimk63/battery-widget/releases/latest)**
+
 ## Desteklenen Cihazlar ve Sağlayıcılar
 
 - **HyperX Cloud III Wireless** (`0x03F0:0x05B7` / `0x0FCC` / `0x098D`) — 62-byte USB HID kontrol kanalı (`0x66 / 0x89` & `0x66 / 0x8A`)

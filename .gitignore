@@ -1,6 +1,7 @@
 # .NET / WPF build artifacts
 bin/
 obj/
+publish/
 TestResults/
 *.user
 *.suo
