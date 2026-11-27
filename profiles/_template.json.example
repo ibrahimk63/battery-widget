@@ -1,0 +1,15 @@
+{
+  "Name": "Ornek Kablosuz Fare",
+  "Category": "Mouse",
+  "VendorIdHex": "0x3554",
+  "ProductIdsHex": [
+    "0xF5D5"
+  ],
+  "UsagePageHex": "0xFF00",
+  "QueryPacketHex": "08 04 00 00 00 00 00 00",
+  "UseFeatureReport": true,
+  "BatteryByteIndex": 6,
+  "ChargingByteIndex": 7,
+  "ChargingMask": 1,
+  "MaxBatteryValue": 100
+}

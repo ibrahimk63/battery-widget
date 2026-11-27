@@ -1,0 +1,18 @@
+# .NET / WPF build artifacts
+bin/
+obj/
+TestResults/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# IDE / Editors
+.vs/
+.vscode/
+.idea/
+
+# OS / Logs
+Thumbs.db
+Desktop.ini
+*.log
