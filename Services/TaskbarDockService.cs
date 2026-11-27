@@ -167,6 +167,29 @@ public static partial class TaskbarDockService
         return qunsState is 2 or 3 or 4;
     }
 
+    public static bool ResolveUseLightTaskbarTheme(string? mode, bool windowsUsesLightTaskbar)
+    {
+        if (string.Equals(mode, "Light", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (string.Equals(mode, "Dark", StringComparison.OrdinalIgnoreCase))
+            return false;
+        return windowsUsesLightTaskbar;
+    }
+
+    public static bool IsWindowsTaskbarLightTheme()
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+            return key?.GetValue("SystemUsesLightTheme") is int value && value != 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public static string FormatShortDeviceName(string? name, int maxChars = 12)
     {
         string trimmed = (name ?? string.Empty).Trim();

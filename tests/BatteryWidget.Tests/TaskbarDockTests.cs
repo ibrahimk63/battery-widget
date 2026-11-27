@@ -118,4 +118,16 @@ public class TaskbarDockTests
         Assert.Equal(expected, result);
         Assert.True(result.Length <= 14);
     }
+
+    [Theory]
+    [InlineData("Auto", true, true)]
+    [InlineData("Auto", false, false)]
+    [InlineData("Light", false, true)]
+    [InlineData("Dark", true, false)]
+    [InlineData(null, true, true)]
+    public void ResolveUseLightTaskbarTheme_HonorsModeAndWindowsSetting(
+        string? mode, bool windowsLight, bool expected)
+    {
+        Assert.Equal(expected, TaskbarDockService.ResolveUseLightTaskbarTheme(mode, windowsLight));
+    }
 }

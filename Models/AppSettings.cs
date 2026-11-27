@@ -15,6 +15,7 @@ public sealed class AppSettings
     public double WindowTop { get; set; } = double.NaN;
     public bool IsDockedToTaskbar { get; set; } = false;
     public double TaskbarDockLeft { get; set; } = double.NaN;
+    public string TaskbarThemeMode { get; set; } = "Auto";
     public double Opacity { get; set; } = 0.92;
     public bool AlwaysOnTop { get; set; } = true;
     public int PollIntervalSeconds { get; set; } = 60;

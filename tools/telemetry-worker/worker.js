@@ -33,14 +33,17 @@ export default {
       const appVer = String(payload.AppVersion || payload.appVersion || "unknown").slice(0, 20);
       const detectedCount = Number(payload.DetectedDeviceCount ?? payload.detectedDeviceCount ?? 0);
 
-      const lines = candidates.map((c) => {
-        const vid = String(c.Vid || c.vid || "0x0000").slice(0, 8);
-        const pid = String(c.Pid || c.pid || "0x0000").slice(0, 8);
-        const name = String(c.ProductName || c.productName || "Unknown").slice(0, 64);
-        const inLen = Number(c.MaxIn ?? c.maxIn ?? 0);
-        const outLen = Number(c.MaxOut ?? c.maxOut ?? 0);
-        const featLen = Number(c.MaxFeat ?? c.maxFeat ?? 0);
-        return `• **${name}** — \`${vid}:${pid}\` (In:${inLen} Out:${outLen} Feat:${featLen})`;
+      const normalizedCandidates = candidates.map((c) => ({
+        vid: String(c.Vid || c.vid || "0x0000").slice(0, 8),
+        pid: String(c.Pid || c.pid || "0x0000").slice(0, 8),
+        productName: String(c.ProductName || c.productName || "Unknown").slice(0, 64),
+        maxIn: Number(c.MaxIn ?? c.maxIn ?? 0),
+        maxOut: Number(c.MaxOut ?? c.maxOut ?? 0),
+        maxFeat: Number(c.MaxFeat ?? c.maxFeat ?? 0)
+      }));
+
+      const lines = normalizedCandidates.map((c) => {
+        return `• **${c.productName}** — \`${c.vid}:${c.pid}\` (In:${c.maxIn} Out:${c.maxOut} Feat:${c.maxFeat})`;
       });
 
       const webhookUrl = typeof env.DISCORD_WEBHOOK_URL === "string" ? env.DISCORD_WEBHOOK_URL.trim() : "";
@@ -56,7 +59,7 @@ export default {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "user-agent": "BatteryWidget-Telemetry/1.1"
+          "user-agent": "BatteryWidget-Telemetry/1.2"
         },
         body: JSON.stringify({
           embeds: [
@@ -82,7 +85,44 @@ export default {
         });
       }
 
-      return new Response(JSON.stringify({ ok: true, count: candidates.length, delivered: true }), {
+      let githubDispatched = false;
+      const ghToken = typeof env.GITHUB_TOKEN === "string" ? env.GITHUB_TOKEN.trim() : "";
+      const ghRepo = typeof env.GITHUB_REPO === "string" && env.GITHUB_REPO.trim()
+        ? env.GITHUB_REPO.trim()
+        : "ibrahimk63/battery-widget";
+
+      if (ghToken) {
+        try {
+          const ghResp = await fetch(`https://api.github.com/repos/${ghRepo}/dispatches`, {
+            method: "POST",
+            headers: {
+              "authorization": `Bearer ${ghToken}`,
+              "accept": "application/vnd.github+json",
+              "content-type": "application/json",
+              "user-agent": "BatteryWidget-Telemetry/1.2",
+              "x-github-api-version": "2022-11-28"
+            },
+            body: JSON.stringify({
+              event_type: "unknown_device_report",
+              client_payload: {
+                appVersion: appVer,
+                detectedCount,
+                candidates: normalizedCandidates
+              }
+            })
+          });
+          githubDispatched = ghResp.ok;
+        } catch {
+          githubDispatched = false;
+        }
+      }
+
+      return new Response(JSON.stringify({
+        ok: true,
+        count: normalizedCandidates.length,
+        delivered: true,
+        githubDispatched
+      }), {
         status: 200,
         headers: { "content-type": "application/json" }
       });

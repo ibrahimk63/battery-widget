@@ -368,7 +368,23 @@
                                 <CheckBox x:Name="DockToTaskbarCheck" Content="Görev çubuğuna sabitle (yatay şerit modu)" />
                                 <TextBlock Text="Widget'ı görev çubuğu üzerinde şeffaf ve isimli yatay pil şeridi olarak gösterir. Widget'ı görev çubuğuna sürükleyip bırakarak da geçiş yapabilirsiniz."
                                            Style="{StaticResource SubHintText}"
-                                           Margin="22,2,0,12" />
+                                           Margin="22,2,0,10" />
+
+                                <Grid Margin="22,0,0,12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="175" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Görev Çubuğu Teması:" VerticalAlignment="Center" FontWeight="Medium" FontSize="12.5" />
+                                    <ComboBox x:Name="TaskbarThemeCombo"
+                                              Grid.Column="1"
+                                              Style="{StaticResource DarkComboBox}"
+                                              ItemContainerStyle="{StaticResource DarkComboBoxItem}">
+                                        <ComboBoxItem Content="Otomatik (Windows görev çubuğu temasını algıla)" Tag="Auto" />
+                                        <ComboBoxItem Content="Koyu Görev Çubuğu (Açık renk yazı)" Tag="Dark" />
+                                        <ComboBoxItem Content="Beyaz / Açık Görev Çubuğu (Koyu renk yazı)" Tag="Light" />
+                                    </ComboBox>
+                                </Grid>
 
                                 <CheckBox x:Name="StartWithWindowsCheck" Content="Bilgisayar açıldığında otomatik başlat" />
                                 <TextBlock Text="Windows açılışında sistem tepsisinde (sağ alt) kendiliğinden çalışır."

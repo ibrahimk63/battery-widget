@@ -32,6 +32,9 @@ public partial class WidgetWindow : Window
     private bool _isApplyingLayout;
     private bool _isHiddenByUser;
     private bool _isTemporarilyHidden;
+    private bool _useLightTaskbarTheme;
+    private int _guardianTickCounter;
+    private bool _userPrefsSubscribed;
 
     private IReadOnlyList<DeviceBatteryInfo> _allDevices = [];
     private int _currentPage;
@@ -57,6 +60,12 @@ public partial class WidgetWindow : Window
 
         SourceInitialized += (_, _) => TaskbarDockService.ApplyToolWindowStyle(this);
         Loaded += Window_Loaded;
+        Closed += (_, _) => UnsubscribeSystemEvents();
+
+        Microsoft.Win32.SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
+        _userPrefsSubscribed = true;
+
+        RefreshTaskbarTheme(forceRender: false);
 
         if (_settings.IsDockedToTaskbar)
         {
@@ -99,6 +108,7 @@ public partial class WidgetWindow : Window
     public void ApplySettings()
     {
         AlwaysOnTopMenuItem.IsChecked = _settings.AlwaysOnTop;
+        RefreshTaskbarTheme(forceRender: true);
 
         if (_settings.IsDockedToTaskbar != _isDockedToTaskbar)
         {
@@ -178,11 +188,60 @@ public partial class WidgetWindow : Window
     public void ShutdownDockWatcher()
     {
         _dockGuardianTimer.Stop();
+        UnsubscribeSystemEvents();
+    }
+
+    private void UnsubscribeSystemEvents()
+    {
+        if (_userPrefsSubscribed)
+        {
+            Microsoft.Win32.SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
+            _userPrefsSubscribed = false;
+        }
+    }
+
+    private void OnUserPreferenceChanged(object? sender, Microsoft.Win32.UserPreferenceChangedEventArgs e)
+    {
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+            return;
+
+        Dispatcher.BeginInvoke(() => RefreshTaskbarTheme(forceRender: false));
+    }
+
+    private void RefreshTaskbarTheme(bool forceRender)
+    {
+        bool nextLight = TaskbarDockService.ResolveUseLightTaskbarTheme(
+            _settings.TaskbarThemeMode,
+            TaskbarDockService.IsWindowsTaskbarLightTheme());
+
+        bool changed = nextLight != _useLightTaskbarTheme;
+        if (!changed && !forceRender)
+            return;
+
+        _useLightTaskbarTheme = nextLight;
+        ApplyTaskbarThemeChrome();
+
+        if (_isDockedToTaskbar && (changed || forceRender))
+            RenderCurrentPage(force: true);
+    }
+
+    private void ApplyTaskbarThemeChrome()
+    {
+        string styleKey = _useLightTaskbarTheme ? "TaskbarHostBorderLightStyle" : "TaskbarHostBorderDarkStyle";
+        if (TryFindResource(styleKey) is System.Windows.Style style)
+            TaskbarRootBorder.Style = style;
+
+        var mutedBrush = new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString(
+            _useLightTaskbarTheme ? "#4B5563" : "#9CA3AF"));
+        TaskbarPageIndicator.Foreground = mutedBrush;
+        TaskbarEmptyText.Foreground = mutedBrush;
     }
 
     private void RenderCurrentPage(bool force = false)
     {
-        string modePrefix = _isDockedToTaskbar ? "TB|" : "DK|";
+        string modePrefix = _isDockedToTaskbar
+            ? (_useLightTaskbarTheme ? "TBL|" : "TBD|")
+            : "DK|";
 
         if (_allDevices.Count == 0)
         {
@@ -254,7 +313,8 @@ public partial class WidgetWindow : Window
                     {
                         Width = 1,
                         Height = 14,
-                        Background = new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#36FFFFFF")),
+                        Background = new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString(
+                            _useLightTaskbarTheme ? "#33000000" : "#36FFFFFF")),
                         Margin = new Thickness(8, 0, 8, 0),
                         VerticalAlignment = VerticalAlignment.Center
                     });
@@ -295,14 +355,15 @@ public partial class WidgetWindow : Window
 
     private UIElement BuildTaskbarDeviceItem(DeviceBatteryInfo device)
     {
-        var accent = GetBatteryBrush(device);
-        var percentColor = GetTaskbarPercentBrush(device);
+        bool isLight = _useLightTaskbarTheme;
+        var accent = GetTaskbarAccentBrush(device, isLight);
+        var percentColor = GetTaskbarPercentBrush(device, isLight);
 
         var row = new StackPanel
         {
             Orientation = System.Windows.Controls.Orientation.Horizontal,
             VerticalAlignment = VerticalAlignment.Center,
-            Opacity = device.IsConnected ? 1.0 : 0.62,
+            Opacity = device.IsConnected ? 1.0 : (isLight ? 0.72 : 0.62),
             ToolTip = BuildDeviceTooltip(device),
             ContextMenu = BuildContextMenu(device, isDocked: true)
         };
@@ -321,6 +382,7 @@ public partial class WidgetWindow : Window
         {
             Text = device.IconGlyph,
             FontSize = 12.5,
+            Foreground = new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString(isLight ? "#111827" : "#F3F4F6")),
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 0, 4, 0)
         });
@@ -329,8 +391,8 @@ public partial class WidgetWindow : Window
         {
             Text = TaskbarDockService.FormatShortDeviceName(device.Name, 14),
             FontSize = 11.5,
-            FontWeight = FontWeights.Medium,
-            Foreground = new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#E5E7EB")),
+            FontWeight = isLight ? FontWeights.SemiBold : FontWeights.Medium,
+            Foreground = new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString(isLight ? "#111827" : "#E5E7EB")),
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 0, 5, 0)
         });
@@ -616,18 +678,35 @@ public partial class WidgetWindow : Window
         return new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#22C55E"));
     }
 
-    private static WpfBrush GetTaskbarPercentBrush(DeviceBatteryInfo device)
+    private static WpfBrush GetTaskbarAccentBrush(DeviceBatteryInfo device, bool isLightTaskbar)
+    {
+        if (!isLightTaskbar)
+            return GetBatteryBrush(device);
+
+        int effective = device.EffectiveRingPercent;
+        if (!device.IsConnected || effective < 0)
+            return new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#6B7280"));
+        if (device.IsCharging)
+            return new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#0284C7"));
+        if (effective <= 25 && (device.BatteryPercent <= 15 || string.Equals(device.DisplayLevelText, "Düşük", StringComparison.OrdinalIgnoreCase) || string.Equals(device.DisplayLevelText, "Boş", StringComparison.OrdinalIgnoreCase)))
+            return new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#DC2626"));
+        if (effective <= 35)
+            return new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#D97706"));
+        return new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#16A34A"));
+    }
+
+    private static WpfBrush GetTaskbarPercentBrush(DeviceBatteryInfo device, bool isLightTaskbar)
     {
         int effective = device.EffectiveRingPercent;
         if (!device.IsConnected || effective < 0)
-            return new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#9CA3AF"));
+            return new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString(isLightTaskbar ? "#4B5563" : "#9CA3AF"));
         if (device.IsCharging)
-            return new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#38BDF8"));
+            return new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString(isLightTaskbar ? "#0369A1" : "#38BDF8"));
         if (effective <= 25 && (device.BatteryPercent <= 15 || string.Equals(device.DisplayLevelText, "Düşük", StringComparison.OrdinalIgnoreCase) || string.Equals(device.DisplayLevelText, "Boş", StringComparison.OrdinalIgnoreCase)))
-            return new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#F87171"));
+            return new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString(isLightTaskbar ? "#B91C1C" : "#F87171"));
         if (effective <= 35)
-            return new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#FBBF24"));
-        return new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString("#4ADE80"));
+            return new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString(isLightTaskbar ? "#B45309" : "#FBBF24"));
+        return new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString(isLightTaskbar ? "#15803D" : "#4ADE80"));
     }
 
     private void EnterTaskbarDockMode(double desiredLeft, bool save, TaskbarSnapshot? explicitSnapshot = null)
@@ -644,8 +723,7 @@ public partial class WidgetWindow : Window
             DockToggleMenuItem.Header = "Masaüstüne Ayır";
             Topmost = true;
             Opacity = 1.0;
-
-            RenderCurrentPage(force: true);
+            RefreshTaskbarTheme(forceRender: true);
             UpdateLayout();
             SnapToTaskbar(desiredLeft, save, explicitSnapshot);
 
@@ -760,6 +838,12 @@ public partial class WidgetWindow : Window
     {
         if (!_isDockedToTaskbar || _isDragging || _isApplyingLayout || _isHiddenByUser)
             return;
+
+        if (++_guardianTickCounter >= 4)
+        {
+            _guardianTickCounter = 0;
+            RefreshTaskbarTheme(forceRender: false);
+        }
 
         bool fullscreen = TaskbarDockService.IsFullscreenAppActive();
         double centerX = Left + Math.Max(ActualWidth, 80) / 2.0;

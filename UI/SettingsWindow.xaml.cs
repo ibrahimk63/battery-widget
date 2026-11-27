@@ -56,6 +56,7 @@ public partial class SettingsWindow : Window
 
         AlwaysOnTopCheck.IsChecked = _settings.AlwaysOnTop;
         DockToTaskbarCheck.IsChecked = _settings.IsDockedToTaskbar;
+        SelectTaskbarThemeOption(_settings.TaskbarThemeMode);
         StartWithWindowsCheck.IsChecked = _settings.StartWithWindows;
         LowBatteryNotifCheck.IsChecked = _settings.EnableLowBatteryNotifications;
         AutoAppUpdateCheck.IsChecked = _settings.EnableAutoAppUpdate;
@@ -536,12 +537,27 @@ public partial class SettingsWindow : Window
         }
     }
 
+    private void SelectTaskbarThemeOption(string? mode)
+    {
+        string normalized = string.IsNullOrWhiteSpace(mode) ? "Auto" : mode.Trim();
+        foreach (var item in TaskbarThemeCombo.Items.OfType<System.Windows.Controls.ComboBoxItem>())
+        {
+            if (string.Equals(item.Tag as string, normalized, StringComparison.OrdinalIgnoreCase))
+            {
+                TaskbarThemeCombo.SelectedItem = item;
+                return;
+            }
+        }
+        TaskbarThemeCombo.SelectedIndex = 0;
+    }
+
     private void Save_Click(object sender, RoutedEventArgs e)
     {
         int idx = Math.Clamp((int)Math.Round(IntervalSlider.Value), 0, IntervalStepsSeconds.Length - 1);
 
         _settings.AlwaysOnTop = AlwaysOnTopCheck.IsChecked == true;
         _settings.IsDockedToTaskbar = DockToTaskbarCheck.IsChecked == true;
+        _settings.TaskbarThemeMode = (TaskbarThemeCombo.SelectedItem as System.Windows.Controls.ComboBoxItem)?.Tag as string ?? "Auto";
         _settings.StartWithWindows = StartWithWindowsCheck.IsChecked == true;
         _settings.EnableLowBatteryNotifications = LowBatteryNotifCheck.IsChecked == true;
         _settings.EnableAutoAppUpdate = AutoAppUpdateCheck.IsChecked == true;
