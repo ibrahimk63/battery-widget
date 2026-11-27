@@ -36,35 +36,35 @@ public partial class SettingsWindow : Window
     private readonly AppSettings _settings;
     private readonly BatteryMonitorService _monitorService;
     private readonly Action _onSaved;
-    private readonly UpdateCheckResult? _updateInfo;
+    private readonly Func<UpdateCheckResult, IProgress<double>?, CancellationToken, Task<(bool Started, string Message)>>? _applyUpdateAsync;
+    private UpdateCheckResult? _updateInfo;
     private IReadOnlyList<LearnedCandidate> _currentCandidates = [];
 
     public SettingsWindow(
         AppSettings settings,
         BatteryMonitorService monitorService,
         Action onSaved,
-        UpdateCheckResult? updateInfo = null)
+        UpdateCheckResult? updateInfo = null,
+        Func<UpdateCheckResult, IProgress<double>?, CancellationToken, Task<(bool Started, string Message)>>? applyUpdateAsync = null)
     {
         InitializeComponent();
         _settings = settings;
         _monitorService = monitorService;
         _onSaved = onSaved;
         _updateInfo = updateInfo;
+        _applyUpdateAsync = applyUpdateAsync;
 
         AlwaysOnTopCheck.IsChecked = _settings.AlwaysOnTop;
         StartWithWindowsCheck.IsChecked = _settings.StartWithWindows;
         LowBatteryNotifCheck.IsChecked = _settings.EnableLowBatteryNotifications;
+        AutoAppUpdateCheck.IsChecked = _settings.EnableAutoAppUpdate;
         RemoteSyncCheck.IsChecked = _settings.EnableRemoteProfileSync;
         AnonymousReportCheck.IsChecked = _settings.EnableAnonymousReporting;
         ThresholdSlider.Value = _settings.LowBatteryThreshold;
         IntervalSlider.Value = FindNearestStepIndex(_settings.PollIntervalSeconds);
         OpacitySlider.Value = _settings.Opacity;
 
-        if (_updateInfo is { HasUpdate: true })
-        {
-            UpdateBadgeBtn.Content = $"Yeni Sürüm: v{_updateInfo.LatestVersion} — İndir";
-            UpdateBadgeBtn.Visibility = Visibility.Visible;
-        }
+        RefreshUpdateUi();
 
         UpdateSyncStatusText();
         UpdateLabels();
@@ -253,11 +253,93 @@ public partial class SettingsWindow : Window
             : $"Hazır temel katalog: {count} profil";
     }
 
-    private void OpenUpdateUrl_Click(object sender, RoutedEventArgs e)
+    private void RefreshUpdateUi()
     {
-        if (_updateInfo is null || string.IsNullOrWhiteSpace(_updateInfo.ReleaseUrl))
+        if (_updateInfo is { HasUpdate: true })
+        {
+            UpdateBadgeBtn.Content = $"Yeni Sürüm: v{_updateInfo.LatestVersion} — Şimdi Güncelle";
+            UpdateBadgeBtn.Visibility = Visibility.Visible;
+            AppUpdateStatusText.Text = $"Yeni sürüm hazır: v{_updateInfo.LatestVersion} (Mevcut: v{_updateInfo.CurrentVersion})";
+        }
+        else
+        {
+            UpdateBadgeBtn.Visibility = Visibility.Collapsed;
+            AppUpdateStatusText.Text = $"Mevcut sürüm: v{UpdateCheckService.GetCurrentVersion()} (Güncel)";
+        }
+    }
+
+    private async void CheckAppUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        CheckAppUpdateBtn.IsEnabled = false;
+        AppUpdateStatusText.Text = "Yeni sürüm kontrol ediliyor...";
+        try
+        {
+            var result = await UpdateCheckService.CheckForUpdateAsync();
+            if (result is null)
+            {
+                AppUpdateStatusText.Text = "GitHub ile bağlantı kurulamadı.";
+                return;
+            }
+
+            _updateInfo = result;
+            RefreshUpdateUi();
+            if (result.HasUpdate)
+                AppUpdateStatusText.Text = $"Yeni sürüm bulundu: v{result.LatestVersion}. Üstteki yeşil butonla otomatik güncelleyebilirsiniz.";
+        }
+        catch (Exception ex)
+        {
+            AppUpdateStatusText.Text = $"Kontrol hatası: {ex.Message}";
+        }
+        finally
+        {
+            CheckAppUpdateBtn.IsEnabled = true;
+        }
+    }
+
+    private async void OpenUpdateUrl_Click(object sender, RoutedEventArgs e)
+    {
+        if (_updateInfo is null)
             return;
 
+        if (_applyUpdateAsync is not null
+            && !string.IsNullOrWhiteSpace(_updateInfo.DownloadUrl)
+            && SelfUpdateService.CanSelfUpdateInPlace(Environment.ProcessPath))
+        {
+            UpdateBadgeBtn.IsEnabled = false;
+            CheckAppUpdateBtn.IsEnabled = false;
+            var targetVer = _updateInfo.LatestVersion;
+            var progress = new Progress<double>(p =>
+            {
+                int pct = (int)Math.Round(p * 100);
+                UpdateBadgeBtn.Content = $"İndiriliyor... %{pct}";
+                AppUpdateStatusText.Text = $"v{targetVer} indiriliyor (%{pct})...";
+            });
+
+            try
+            {
+                var (started, message) = await _applyUpdateAsync(_updateInfo, progress, CancellationToken.None);
+                AppUpdateStatusText.Text = message;
+                if (!started)
+                {
+                    UpdateBadgeBtn.Content = $"Yeni Sürüm: v{targetVer} — Şimdi Güncelle";
+                    UpdateBadgeBtn.IsEnabled = true;
+                    CheckAppUpdateBtn.IsEnabled = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                AppUpdateStatusText.Text = $"Güncelleme hatası: {ex.Message}";
+                UpdateBadgeBtn.Content = $"Yeni Sürüm: v{targetVer} — Şimdi Güncelle";
+                UpdateBadgeBtn.IsEnabled = true;
+                CheckAppUpdateBtn.IsEnabled = true;
+            }
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_updateInfo.ReleaseUrl))
+            return;
+
+        AppUpdateStatusText.Text = "Klasöre yazma izni yok; indirme sayfası tarayıcıda açılıyor...";
         try
         {
             Process.Start(new ProcessStartInfo(_updateInfo.ReleaseUrl) { UseShellExecute = true });
@@ -460,6 +542,7 @@ public partial class SettingsWindow : Window
         _settings.AlwaysOnTop = AlwaysOnTopCheck.IsChecked == true;
         _settings.StartWithWindows = StartWithWindowsCheck.IsChecked == true;
         _settings.EnableLowBatteryNotifications = LowBatteryNotifCheck.IsChecked == true;
+        _settings.EnableAutoAppUpdate = AutoAppUpdateCheck.IsChecked == true;
         _settings.EnableRemoteProfileSync = RemoteSyncCheck.IsChecked == true;
         _settings.EnableAnonymousReporting = AnonymousReportCheck.IsChecked == true;
         _settings.LowBatteryThreshold = (int)ThresholdSlider.Value;

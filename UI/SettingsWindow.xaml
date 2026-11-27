@@ -429,6 +429,25 @@
                             <StackPanel>
                                 <TextBlock Text="Güncellemeler ve Topluluk Desteği" Style="{StaticResource SectionTitleText}" />
 
+                                <CheckBox x:Name="AutoAppUpdateCheck" Content="Uygulama güncellemelerini otomatik indir ve yükle (Önerilen)" />
+                                <TextBlock Text="Yeni sürüm yayınlandığında manuel .exe indirmeden arka planda güncellenir ve yeniden başlatılır."
+                                           Style="{StaticResource SubHintText}"
+                                           Margin="22,2,0,10" />
+
+                                <StackPanel Orientation="Horizontal" Margin="22,0,0,14">
+                                    <Button x:Name="CheckAppUpdateBtn"
+                                            Content="Uygulama Güncellemesini Kontrol Et"
+                                            Style="{StaticResource DarkButton}"
+                                            Padding="12,5"
+                                            Click="CheckAppUpdate_Click"
+                                            Margin="0,0,10,0" />
+                                    <TextBlock x:Name="AppUpdateStatusText"
+                                               Foreground="#9CA3AF"
+                                               FontSize="11.5"
+                                               VerticalAlignment="Center"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+
                                 <CheckBox x:Name="RemoteSyncCheck" Content="Cihaz veritabanını otomatik güncelle (Önerilen)" />
                                 <TextBlock Text="Yeni çıkan cihaz profilleri, siz yeni .exe indirmeden günde 1 kez otomatik indirilir."
                                            Style="{StaticResource SubHintText}"

@@ -21,6 +21,7 @@ public sealed class AppSettings
     public bool StartWithWindows { get; set; } = false;
     public List<HiddenDeviceEntry> HiddenDevices { get; set; } = [];
 
+    public bool EnableAutoAppUpdate { get; set; } = true;
     public bool EnableRemoteProfileSync { get; set; } = true;
     public DateTimeOffset? LastProfileSyncUtc { get; set; }
     public string? RemoteProfileEtag { get; set; }
