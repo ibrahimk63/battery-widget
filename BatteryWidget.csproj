@@ -8,7 +8,7 @@
     <UseWPF>true</UseWPF>
     <AssemblyName>BatteryWidget</AssemblyName>
     <RootNamespace>BatteryWidget</RootNamespace>
-    <Version>1.3.2</Version>
+    <Version>1.3.3</Version>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <DefaultItemExcludes>$(DefaultItemExcludes);tests\**</DefaultItemExcludes>
     <SatelliteResourceLanguages>tr;en</SatelliteResourceLanguages>

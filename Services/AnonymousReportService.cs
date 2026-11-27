@@ -43,13 +43,15 @@ public static class AnonymousReportService
     public static AnonymousReportPayload BuildPayload(
         IReadOnlyList<DeviceBatteryInfo> activeDevices,
         IEnumerable<HidDeviceSnapshot>? snapshots = null,
-        string? appVersion = null)
+        string? appVersion = null,
+        IReadOnlyList<HidDeviceProfile>? knownProfiles = null)
     {
         string version = string.IsNullOrWhiteSpace(appVersion)
             ? (Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.1.0")
             : appVersion;
 
         IEnumerable<HidDeviceSnapshot> source = snapshots ?? EnumerateVendorHidSnapshots();
+        IReadOnlyList<HidDeviceProfile> profiles = knownProfiles ?? RemoteProfileSyncService.LoadCachedOrEmbeddedDatabase().Profiles;
 
         var detectedTokens = activeDevices
             .SelectMany(d => new[] { d.Id ?? string.Empty, d.Name ?? string.Empty })
@@ -59,7 +61,17 @@ public static class AnonymousReportService
         var unknownCandidates = source
             .Where(s => s.VendorId > 0 && (s.MaxOut >= 8 || s.MaxFeat >= 8))
             .GroupBy(s => (s.VendorId, s.ProductId))
-            .Where(g => !IsAlreadyDetected(g.Key.VendorId, g.Key.ProductId, g.First().ProductName, detectedTokens))
+            .Where(g =>
+            {
+                var firstName = g.First().ProductName;
+                if (IsNonBatterySystemDevice(g.Key.VendorId, g.Key.ProductId, firstName))
+                    return false;
+                if (IsAlreadyDetected(g.Key.VendorId, g.Key.ProductId, firstName, detectedTokens))
+                    return false;
+                if (IsCoveredBySiblingProfile(g.Key.VendorId, g.Key.ProductId, profiles, detectedTokens))
+                    return false;
+                return true;
+            })
             .Select(g =>
             {
                 var best = g.OrderByDescending(x => x.MaxOut).ThenByDescending(x => x.MaxFeat).First();
@@ -189,6 +201,53 @@ public static class AnonymousReportService
                 token.Contains(productName, StringComparison.OrdinalIgnoreCase))
             {
                 return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static bool IsNonBatterySystemDevice(int vendorId, int productId, string? productName)
+    {
+        _ = productId;
+        if (vendorId is 0x00FF or 0x048D)
+            return true;
+
+        if (string.IsNullOrWhiteSpace(productName))
+            return false;
+
+        return productName.Contains("Virtual Multitouch", StringComparison.OrdinalIgnoreCase) ||
+               productName.Contains("Virtual HID", StringComparison.OrdinalIgnoreCase) ||
+               productName.Contains("ITE Device", StringComparison.OrdinalIgnoreCase) ||
+               productName.Contains("MYSTIC LIGHT", StringComparison.OrdinalIgnoreCase) ||
+               productName.Contains("AURA LED", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsCoveredBySiblingProfile(
+        int vid,
+        int pid,
+        IReadOnlyList<HidDeviceProfile> profiles,
+        IReadOnlyList<string> detectedTokens)
+    {
+        foreach (var profile in profiles)
+        {
+            if (profile.ParseVendorId() != vid)
+                continue;
+
+            var pids = profile.ParseProductIds();
+            if (pids.Count > 0 && !pids.Contains(pid))
+                continue;
+
+            if (!string.IsNullOrWhiteSpace(profile.Name) &&
+                detectedTokens.Any(t => t.Contains(profile.Name, StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+
+            foreach (int siblingPid in pids)
+            {
+                if (IsAlreadyDetected(vid, siblingPid, string.Empty, detectedTokens))
+                    return true;
             }
         }
 

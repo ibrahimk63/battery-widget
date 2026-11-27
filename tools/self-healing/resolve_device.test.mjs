@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   inferCategory,
   isCoveredInDatabase,
+  isNonBatteryNoise,
   matchKnownFamily,
   normalizeHex,
   parseUsbIds,
@@ -103,4 +104,28 @@ test("parseUsbIds extracts vendor and device safely", () => {
     vendorName: "Logitech, Inc.",
     deviceName: null
   });
+});
+
+test("isNonBatteryNoise filters virtual multitouch and ITE RGB devices", () => {
+  assert.equal(isNonBatteryNoise({ vid: "0x00FF", pid: "0xBACC", productName: "Virtual Multitouch Device" }), true);
+  assert.equal(isNonBatteryNoise({ vid: "0x048D", pid: "0x5702", productName: "ITE Device" }), true);
+  assert.equal(isNonBatteryNoise({ vid: "0x04F3", pid: "0x026F", productName: "HighSpeed Receiver" }), false);
+});
+
+test("resolveCandidates ignores system noise and resolves Elan/PAW3950 passive-push family", () => {
+  const result = resolveCandidates(sampleDb, [
+    { vid: "0x00FF", pid: "0xBACC", productName: "Virtual Multitouch Device", maxIn: 65, maxOut: 65, maxFeat: 0 },
+    { vid: "0x048D", pid: "0x5702", productName: "ITE Device", maxIn: 0, maxOut: 0, maxFeat: 64 },
+    { vid: "0x04F3", pid: "0x026F", productName: "HighSpeed Receiver", maxIn: 0, maxOut: 0, maxFeat: 136 }
+  ]);
+
+  assert.equal(result.ignored.length, 2);
+  assert.equal(result.unresolved.length, 0);
+  assert.equal(result.resolved.length, 1);
+  assert.equal(result.resolved[0].family, "Elan/PAW3950-Passive");
+  assert.equal(result.resolved[0].profile.name, "Throne Repel 8K");
+  assert.equal(result.resolved[0].profile.readPassiveInput, true);
+  assert.equal(result.resolved[0].profile.expectedReportId, 4);
+  assert.equal(result.resolved[0].profile.linkStatusByteIndex, 1);
+  assert.deepEqual(result.resolved[0].profile.productIdsHex, ["0x026F", "0x026E"]);
 });

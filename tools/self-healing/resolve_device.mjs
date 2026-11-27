@@ -15,6 +15,19 @@ const COMPX_VERIFIED_VIDS = new Set([
   "0x1D57"  // CompX 2.4GHz Wireless Dongle
 ]);
 
+const NON_BATTERY_SYSTEM_VIDS = new Set([
+  "0x00FF", // Virtual HID / Virtual Multitouch drivers
+  "0x048D"  // ITE Tech motherboard/laptop EC & RGB lighting controllers
+]);
+
+export function isNonBatteryNoise(candidate) {
+  const vid = normalizeHex(candidate.vid ?? candidate.Vid);
+  if (NON_BATTERY_SYSTEM_VIDS.has(vid))
+    return true;
+  const productName = String(candidate.productName ?? candidate.ProductName ?? "");
+  return /virtual multitouch|virtual hid|ite device|mystic light|aura led/i.test(productName);
+}
+
 export function normalizeHex(value) {
   const cleaned = String(value ?? "")
     .trim()
@@ -149,6 +162,39 @@ export function matchKnownFamily(candidate) {
     };
   }
 
+  // Family 4: Elan / PAW3950 OEM passive-push receivers & mice (0x04F3)
+  if (
+    vid === "0x04F3" &&
+    (pid === "0x026F" ||
+      pid === "0x026E" ||
+      (maxFeat >= 136 && /highspeed receiver|gaming mouse|repel|x23|sm809|kojin|madmouse/i.test(productName)))
+  ) {
+    const isKnownPair = pid === "0x026F" || pid === "0x026E";
+    return {
+      family: "Elan/PAW3950-Passive",
+      profile: {
+        name: /highspeed receiver|gaming mouse wired/i.test(productName) ? "Throne Repel 8K" : productName,
+        category: "Mouse",
+        vendorIdHex: "0x04F3",
+        productIdsHex: isKnownPair ? ["0x026F", "0x026E"] : [pid],
+        wiredProductIdsHex: isKnownPair ? ["0x026E"] : [],
+        usagePageHex: "0x000A",
+        useFeatureReport: false,
+        readPassiveInput: true,
+        mergeProductIds: true,
+        expectedReportId: 4,
+        linkStatusByteIndex: 1,
+        linkStatusOnlineValue: 1,
+        batteryByteIndex: 4,
+        batteryMask: 255,
+        chargingByteIndex: 5,
+        chargingEqualsValue: 1,
+        passiveStaleSeconds: 25,
+        maxBatteryValue: 100
+      }
+    };
+  }
+
   return null;
 }
 
@@ -216,6 +262,7 @@ export function resolveCandidates(db, candidates, options = {}) {
   const resolved = [];
   const unresolved = [];
   const alreadyCovered = [];
+  const ignored = [];
   const seenInBatch = new Set();
 
   for (const raw of candidates ?? []) {
@@ -234,6 +281,11 @@ export function resolveCandidates(db, candidates, options = {}) {
       maxOut: Number(raw.maxOut ?? raw.MaxOut ?? 0),
       maxFeat: Number(raw.maxFeat ?? raw.MaxFeat ?? 0)
     };
+
+    if (isNonBatteryNoise(candidate)) {
+      ignored.push(candidate);
+      continue;
+    }
 
     if (isCoveredInDatabase(workingDb, vid, pid)) {
       alreadyCovered.push(candidate);
@@ -271,6 +323,7 @@ export function resolveCandidates(db, candidates, options = {}) {
     resolved,
     unresolved,
     alreadyCovered,
+    ignored,
     dbUpdated: resolved.length > 0,
     totalProfiles: workingDb.profiles.length
   };
@@ -345,6 +398,7 @@ async function main() {
     resolved: result.resolved,
     unresolved: result.unresolved,
     alreadyCovered: result.alreadyCovered,
+    ignored: result.ignored,
     dbUpdated: result.dbUpdated,
     totalProfiles: result.totalProfiles
   };

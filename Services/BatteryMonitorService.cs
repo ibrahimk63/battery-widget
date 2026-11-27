@@ -216,6 +216,11 @@ public sealed class BatteryMonitorService : IDisposable
     public void Dispose()
     {
         Stop();
+        foreach (var provider in _providers)
+        {
+            if (provider is IDisposable disposable)
+                disposable.Dispose();
+        }
         _pollLock.Dispose();
     }
 }
