@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { searchOpenSourceEvidence } from "./oss_research.mjs";
+import { extractProtocolWithAi } from "./ai_research.mjs";
 
 const USB_IDS_URL = "https://raw.githubusercontent.com/systemd/systemd/main/hwdb.d/usb.ids";
 
@@ -22,10 +24,57 @@ const NON_BATTERY_SYSTEM_VIDS = new Set([
 
 export function isNonBatteryNoise(candidate) {
   const vid = normalizeHex(candidate.vid ?? candidate.Vid);
+  const productName = String(candidate.productName ?? candidate.ProductName ?? "");
+
   if (NON_BATTERY_SYSTEM_VIDS.has(vid))
     return true;
-  const productName = String(candidate.productName ?? candidate.ProductName ?? "");
-  return /virtual multitouch|virtual hid|ite device|mystic light|aura led/i.test(productName);
+
+  // Low-cost wired-only USB optical mouse controllers (e.g. Instant Microelectronics 0x30FA)
+  if (vid === "0x30FA" && !/wireless|2\.4g|receiver|dongle|\bbt\b|bluetooth/i.test(productName))
+    return true;
+
+  return /virtual multitouch|virtual hid|ite device|mystic light|aura led|\bhidi2c\b|i2c hid|precision touchpad|elan touchpad|synaptics|asus aura|gigabyte rgb|nzxt hue|lighting node/i.test(productName);
+}
+
+/**
+ * Parses open GitHub `[Unknown Device]` issues back into normalized resolver candidates
+ * for scheduled weekly OSS/AI re-scanning.
+ */
+export function parseIssuesToCandidates(issues) {
+  const candidates = [];
+  for (const issue of issues ?? []) {
+    const title = String(issue?.title ?? "");
+    const body = String(issue?.body ?? "");
+
+    const vidPidMatch =
+      /\((0x[0-9a-f]{4}):(0x[0-9a-f]{4})\)/i.exec(title) ??
+      /`(0x[0-9a-f]{4}):(0x[0-9a-f]{4})`/i.exec(body);
+    if (!vidPidMatch)
+      continue;
+
+    const vid = normalizeHex(vidPidMatch[1]);
+    const pid = normalizeHex(vidPidMatch[2]);
+
+    const bodyNameMatch = /-\s*\*\*Ürün Adı:\*\*\s*(.+)/i.exec(body);
+    const titleNameMatch = /\[Unknown Device\]\s*(.+?)\s*\(0x[0-9a-f]{4}:0x[0-9a-f]{4}\)/i.exec(title);
+    const productName = (bodyNameMatch?.[1] ?? titleNameMatch?.[1] ?? "Unknown").trim();
+
+    const lenMatch = /In:(\d+)\s+Out:(\d+)\s+Feat:(\d+)/i.exec(body);
+    const maxIn = lenMatch ? Number(lenMatch[1]) : 0;
+    const maxOut = lenMatch ? Number(lenMatch[2]) : 0;
+    const maxFeat = lenMatch ? Number(lenMatch[3]) : 0;
+
+    candidates.push({
+      vid,
+      pid,
+      productName,
+      maxIn,
+      maxOut,
+      maxFeat,
+      issueNumber: issue.number ?? null
+    });
+  }
+  return candidates;
 }
 
 export function normalizeHex(value) {
@@ -279,7 +328,8 @@ export function resolveCandidates(db, candidates, options = {}) {
       productName: String(raw.productName ?? raw.ProductName ?? "Unknown").trim(),
       maxIn: Number(raw.maxIn ?? raw.MaxIn ?? 0),
       maxOut: Number(raw.maxOut ?? raw.MaxOut ?? 0),
-      maxFeat: Number(raw.maxFeat ?? raw.MaxFeat ?? 0)
+      maxFeat: Number(raw.maxFeat ?? raw.MaxFeat ?? 0),
+      ...(raw.issueNumber != null ? { issueNumber: Number(raw.issueNumber) } : {})
     };
 
     if (isNonBatteryNoise(candidate)) {
@@ -329,6 +379,100 @@ export function resolveCandidates(db, candidates, options = {}) {
   };
 }
 
+/**
+ * Runs the 4-layer resolution pipeline:
+ *  Layer 1 & 2 (sync deterministic) -> Layer 3 (OSS evidence lookup) -> Layer 4 (GitHub Models AI extraction -> PR proposal).
+ */
+export async function resolveCandidatesAsync(db, candidates, options = {}) {
+  const syncResult = resolveCandidates(db, candidates, options);
+  const aiProposals = [];
+  const ignored = [...syncResult.ignored];
+  const finalUnresolved = [];
+  const maxResearchItems = Number.isFinite(options.maxResearchItems) ? options.maxResearchItems : 5;
+  const nowIso = options.nowIso ?? new Date().toISOString();
+
+  for (let i = 0; i < syncResult.unresolved.length; i++) {
+    const item = syncResult.unresolved[i];
+    if (options.noNetwork || i >= maxResearchItems) {
+      finalUnresolved.push(item);
+      continue;
+    }
+
+    const oss = await searchOpenSourceEvidence(item, {
+      token: options.githubToken ?? "",
+      fetchImpl: options.fetchImpl,
+      maxSnippets: options.maxSnippets ?? 5,
+      timeoutMs: options.ossTimeoutMs ?? 8000
+    });
+
+    const evidenceUrls = oss.evidence.map((e) => e.url);
+    const enrichedItem = {
+      ...item,
+      evidenceUrls,
+      evidenceCount: evidenceUrls.length
+    };
+
+    if (oss.evidence.length === 0 || !options.enableAi || !options.githubToken) {
+      finalUnresolved.push(enrichedItem);
+      continue;
+    }
+
+    const ai = await extractProtocolWithAi(item, oss.evidence, {
+      token: options.githubToken,
+      fetchImpl: options.fetchImpl,
+      models: options.aiModels,
+      endpointUrl: options.aiEndpointUrl,
+      timeoutMs: options.aiTimeoutMs ?? 20000
+    });
+
+    if (ai.accepted && ai.profile) {
+      const proposalDb = structuredClone(syncResult.db);
+      proposalDb.profiles.push(ai.profile);
+      proposalDb.updatedAt = nowIso;
+
+      aiProposals.push({
+        vid: item.vid,
+        pid: item.pid,
+        productName: item.productName,
+        confidence: ai.confidence,
+        reason: ai.reason,
+        sourceUrls: ai.sourceUrls,
+        model: ai.model,
+        profile: ai.profile,
+        ...(item.issueNumber != null ? { issueNumber: item.issueNumber } : {}),
+        updatedDb: proposalDb
+      });
+      continue;
+    }
+
+    if (ai.isNonBattery) {
+      ignored.push({
+        ...enrichedItem,
+        ignoredReason: "ai_confirmed_non_battery",
+        aiReason: ai.reason,
+        sourceUrls: ai.sourceUrls ?? []
+      });
+      continue;
+    }
+
+    finalUnresolved.push({
+      ...enrichedItem,
+      aiSummary: ai.reason
+    });
+  }
+
+  return {
+    db: syncResult.db,
+    resolved: syncResult.resolved,
+    aiProposals,
+    unresolved: finalUnresolved,
+    alreadyCovered: syncResult.alreadyCovered,
+    ignored,
+    dbUpdated: syncResult.dbUpdated,
+    totalProfiles: syncResult.totalProfiles
+  };
+}
+
 async function fetchUsbIdsSafe() {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 6000);
@@ -352,8 +496,11 @@ function parseCliArgs(argv) {
     db: "profiles-db.json",
     payloadFile: null,
     payloadJson: null,
+    issuesFile: null,
     out: null,
-    noNetwork: false
+    writeProposalDir: null,
+    noNetwork: false,
+    enableAi: false
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -361,8 +508,11 @@ function parseCliArgs(argv) {
     if (a === "--db" && argv[i + 1]) args.db = argv[++i];
     else if (a === "--payload-file" && argv[i + 1]) args.payloadFile = argv[++i];
     else if (a === "--payload" && argv[i + 1]) args.payloadJson = argv[++i];
+    else if (a === "--issues-file" && argv[i + 1]) args.issuesFile = argv[++i];
     else if (a === "--out" && argv[i + 1]) args.out = argv[++i];
+    else if (a === "--write-proposal-dir" && argv[i + 1]) args.writeProposalDir = argv[++i];
     else if (a === "--no-network") args.noNetwork = true;
+    else if (a === "--enable-ai") args.enableAi = true;
   }
 
   return args;
@@ -373,29 +523,54 @@ async function main() {
   const dbPath = path.resolve(args.db);
   const db = JSON.parse(fs.readFileSync(dbPath, "utf8"));
 
-  let payload = {};
-  if (args.payloadFile) {
-    payload = JSON.parse(fs.readFileSync(path.resolve(args.payloadFile), "utf8"));
-  } else if (args.payloadJson) {
-    payload = JSON.parse(args.payloadJson);
-  }
+  let rawCandidates = [];
+  if (args.issuesFile) {
+    const issues = JSON.parse(fs.readFileSync(path.resolve(args.issuesFile), "utf8"));
+    rawCandidates = parseIssuesToCandidates(Array.isArray(issues) ? issues : []);
+  } else {
+    let payload = {};
+    if (args.payloadFile) {
+      payload = JSON.parse(fs.readFileSync(path.resolve(args.payloadFile), "utf8"));
+    } else if (args.payloadJson) {
+      payload = JSON.parse(args.payloadJson);
+    }
 
-  const rawCandidates = Array.isArray(payload)
-    ? payload
-    : (payload.candidates ?? payload.UnknownHidCandidates ?? payload.unknownHidCandidates ?? []);
+    rawCandidates = Array.isArray(payload)
+      ? payload
+      : (payload.candidates ?? payload.UnknownHidCandidates ?? payload.unknownHidCandidates ?? []);
+  }
 
   const usbIdsText = args.noNetwork || rawCandidates.length === 0
     ? ""
     : await fetchUsbIdsSafe();
 
-  const result = resolveCandidates(db, rawCandidates, { usbIdsText });
+  const result = await resolveCandidatesAsync(db, rawCandidates, {
+    usbIdsText,
+    noNetwork: args.noNetwork,
+    enableAi: args.enableAi,
+    githubToken: process.env.GITHUB_TOKEN ?? ""
+  });
 
   if (result.dbUpdated) {
     fs.writeFileSync(dbPath, JSON.stringify(result.db, null, 2) + "\n", "utf8");
   }
 
+  if (args.writeProposalDir && result.aiProposals.length > 0) {
+    const propDir = path.resolve(args.writeProposalDir);
+    fs.mkdirSync(propDir, { recursive: true });
+    for (const prop of result.aiProposals) {
+      const slug = `${prop.vid.slice(2)}-${prop.pid.slice(2)}`.toLowerCase();
+      const dbOutPath = path.join(propDir, `proposal-${slug}.profiles-db.json`);
+      fs.writeFileSync(dbOutPath, JSON.stringify(prop.updatedDb, null, 2) + "\n", "utf8");
+    }
+  }
+
+  const slimProposals = result.aiProposals.map(({ updatedDb: _omit, ...rest }) => rest);
+
   const summary = {
     resolved: result.resolved,
+    aiProposals: slimProposals,
+    aiProposalCount: slimProposals.length,
     unresolved: result.unresolved,
     alreadyCovered: result.alreadyCovered,
     ignored: result.ignored,

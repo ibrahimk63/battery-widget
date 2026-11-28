@@ -7,15 +7,15 @@ on:
     inputs:
       vid:
         description: "Vendor ID hex (e.g. 0x3554)"
-        required: true
+        required: false
         default: "0x9999"
       pid:
         description: "Product ID hex (e.g. 0xFA12)"
-        required: true
+        required: false
         default: "0x1234"
       product_name:
         description: "USB Product Name"
-        required: true
+        required: false
         default: "Test Wireless Device"
       max_in:
         description: "Max Input Report Length"
@@ -29,10 +29,19 @@ on:
         description: "Max Feature Report Length"
         required: false
         default: "0"
+      rescan_open_issues:
+        description: "Re-scan open [Unknown Device] issues against OSS + AI"
+        type: boolean
+        required: false
+        default: false
+  schedule:
+    - cron: "0 3 * * 0"
 
 permissions:
   contents: write
   issues: write
+  pull-requests: write
+  models: read
 
 concurrency:
   group: self-healing-profiles
@@ -46,13 +55,37 @@ jobs:
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
 
-      - name: Write dispatch payload
+      - name: Fetch open unknown-device issues (cron / rescan mode)
+        id: fetch_issues
+        if: github.event_name == 'schedule' || inputs.rescan_open_issues == true
+        uses: actions/github-script@v7
+        env:
+          ISSUES_FILE: ${{ runner.temp }}/open-issues.json
+        with:
+          script: |
+            const fs = require('fs');
+            const { owner, repo } = context.repo;
+            const resp = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: 'open',
+              labels: 'unknown-device',
+              sort: 'updated',
+              direction: 'desc',
+              per_page: 10
+            });
+            fs.writeFileSync(process.env.ISSUES_FILE, JSON.stringify(resp.data, null, 2), 'utf8');
+            core.setOutput('count', String(resp.data.length));
+
+      - name: Write dispatch payload (live report / manual test mode)
+        if: github.event_name != 'schedule' && inputs.rescan_open_issues != true
         shell: pwsh
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -85,33 +118,46 @@ jobs:
             Set-Content -LiteralPath $payloadPath -Value $manual -Encoding UTF8
           }
 
-      - name: Run device profile self-healing resolver
+      - name: Run 4-layer device profile self-healing resolver
         id: resolve
+        if: (github.event_name != 'schedule' && inputs.rescan_open_issues != true) || steps.fetch_issues.outputs.count != '0'
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          RESCAN_OPEN_ISSUES: ${{ inputs.rescan_open_issues }}
         run: |
-          $payloadPath = Join-Path $env:RUNNER_TEMP "dispatch-payload.json"
           $outPath = Join-Path $env:RUNNER_TEMP "resolve-result.json"
-          node tools/self-healing/resolve_device.mjs --db profiles-db.json --payload-file $payloadPath --out $outPath
+          $proposalDir = Join-Path $env:RUNNER_TEMP "ai-proposals"
+          $isRescan = ($env:EVENT_NAME -eq "schedule") -or ($env:RESCAN_OPEN_ISSUES -eq "true")
+          if ($isRescan) {
+            $issuesPath = Join-Path $env:RUNNER_TEMP "open-issues.json"
+            node tools/self-healing/resolve_device.mjs --db profiles-db.json --issues-file $issuesPath --enable-ai --out $outPath --write-proposal-dir $proposalDir
+          } else {
+            $payloadPath = Join-Path $env:RUNNER_TEMP "dispatch-payload.json"
+            node tools/self-healing/resolve_device.mjs --db profiles-db.json --payload-file $payloadPath --enable-ai --out $outPath --write-proposal-dir $proposalDir
+          }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $res = Get-Content -LiteralPath $outPath -Raw | ConvertFrom-Json
           "db_updated=$($res.dbUpdated.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "resolved_count=$($res.resolved.Count)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "unresolved_count=$($res.unresolved.Count)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "resolved_count=$(@($res.resolved).Count)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "ai_proposal_count=$(@($res.aiProposals).Count)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "unresolved_count=$(@($res.unresolved).Count)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Setup .NET 10
-        if: steps.resolve.outputs.db_updated == 'true'
+        if: steps.resolve.outputs.db_updated == 'true' || (steps.resolve.outputs.ai_proposal_count != '' && steps.resolve.outputs.ai_proposal_count != '0')
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.0.x"
           dotnet-quality: "ga"
 
-      - name: Validate updated profiles-db.json with dotnet test
+      - name: Validate Layer 2 deterministic profiles with dotnet test
         if: steps.resolve.outputs.db_updated == 'true'
         shell: pwsh
         run: |
           dotnet test tests/BatteryWidget.Tests/BatteryWidget.Tests.csproj --verbosity normal
 
-      - name: Auto-commit and push verified profiles
+      - name: Auto-commit and push Layer 2 verified profiles
         if: steps.resolve.outputs.db_updated == 'true'
         shell: pwsh
         run: |
@@ -122,7 +168,7 @@ jobs:
           git pull --rebase origin main
           git push origin main
 
-      - name: Notify Discord on auto-merged profile
+      - name: Notify Discord on auto-merged Layer 2 profile
         if: steps.resolve.outputs.db_updated == 'true'
         shell: pwsh
         env:
@@ -131,20 +177,163 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:DISCORD_WEBHOOK_URL)) { return }
           $outPath = Join-Path $env:RUNNER_TEMP "resolve-result.json"
           $res = Get-Content -LiteralPath $outPath -Raw | ConvertFrom-Json
-          $lines = $res.resolved | ForEach-Object { "• **$($_.profile.name)** (\`$($_.vid):$($_.pid)\`) — Aile: $($_.family)" }
+          $bt = [char]96
+          $lines = @($res.resolved) | ForEach-Object { "• **$($_.profile.name)** ($bt$($_.vid):$($_.pid)$bt) — Aile: $($_.family)" }
           $body = @{
             embeds = @(
               @{
                 title = "BatteryWidget — Otomatik Cihaz Tanıma (Auto-Healed)"
                 color = 2278750
-                description = ($lines -join "`n") + "`n`nTüm testler geçti ve `profiles-db.json` güncellendi. Kullanıcılar 24 saat içinde otomatik alacak."
+                description = ($lines -join "`n") + "`n`nTüm testler geçti ve ${bt}profiles-db.json${bt} güncellendi. Kullanıcılar 24 saat içinde otomatik alacak."
               }
             )
           } | ConvertTo-Json -Depth 5
           Invoke-RestMethod -Uri $env:DISCORD_WEBHOOK_URL -Method Post -ContentType "application/json" -Body $body | Out-Null
 
+      - name: Create verified Pull Requests for Layer 4 AI-discovered profiles
+        if: steps.resolve.outputs.ai_proposal_count != '' && steps.resolve.outputs.ai_proposal_count != '0'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          $outPath = Join-Path $env:RUNNER_TEMP "resolve-result.json"
+          $res = Get-Content -LiteralPath $outPath -Raw | ConvertFrom-Json
+
+          git config user.name "battery-widget-bot[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          try {
+            gh label create "ai-profile-proposal" --repo $env:GITHUB_REPOSITORY --color "0ea5e9" --description "GitHub Models AI tarafından açık kaynak kanıttan üretilen doğrulanmış profil PR" 2>$null
+          } catch {}
+
+          $createdPrs = @()
+
+          try {
+            foreach ($prop in @($res.aiProposals)) {
+              $vidClean = $prop.vid.Replace("0x", "").ToLower()
+              $pidClean = $prop.pid.Replace("0x", "").ToLower()
+              $branchName = "auto/ai-profile-$vidClean-$pidClean"
+
+              $existingPrJson = gh pr list --repo $env:GITHUB_REPOSITORY --state open --head $branchName --json number,url
+              $existingPrs = if ($existingPrJson) { $existingPrJson | ConvertFrom-Json } else { @() }
+              if (@($existingPrs).Count -gt 0) {
+                Write-Host "Open PR already exists for $branchName ($($existingPrs[0].url)), skipping."
+                continue
+              }
+
+              git fetch origin main
+              git checkout -B $branchName origin/main
+
+              $propFilePath = Join-Path $env:RUNNER_TEMP "ai-prop-$vidClean-$pidClean.json"
+              $prop | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $propFilePath -Encoding UTF8
+
+              $mergeScriptPath = Join-Path $env:RUNNER_TEMP "merge-proposal.cjs"
+              @'
+const fs = require("fs");
+const db = JSON.parse(fs.readFileSync("profiles-db.json", "utf8"));
+const prop = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const prof = prop.profile;
+const exists = db.profiles.some((p) =>
+  String(p.vendorIdHex).toLowerCase() === String(prof.vendorIdHex).toLowerCase() &&
+  Array.isArray(p.productIdsHex) &&
+  p.productIdsHex.some((x) => prof.productIdsHex.map((y) => y.toLowerCase()).includes(String(x).toLowerCase()))
+);
+if (!exists) {
+  db.profiles.push(prof);
+  db.updatedAt = new Date().toISOString();
+  fs.writeFileSync("profiles-db.json", JSON.stringify(db, null, 2) + "\n", "utf8");
+}
+'@ | Set-Content -LiteralPath $mergeScriptPath -Encoding UTF8
+              node $mergeScriptPath $propFilePath
+
+              dotnet test tests/BatteryWidget.Tests/BatteryWidget.Tests.csproj --verbosity normal
+              if ($LASTEXITCODE -ne 0) {
+                Write-Warning "dotnet test failed for AI proposal $($prop.vid):$($prop.pid). Skipping PR."
+                git checkout -- profiles-db.json
+                git checkout -f main
+                continue
+              }
+
+              git add profiles-db.json
+              $stagedDiff = git diff --cached --name-only
+              if (-not $stagedDiff) {
+                Write-Host "No changes for $($prop.vid):$($prop.pid), skipping PR."
+                git checkout -f main
+                continue
+              }
+
+              $prTitle = "auto(ai-profile): add $($prop.profile.name) ($($prop.vid):$($prop.pid))"
+              git commit -m $prTitle
+              git push -f origin $branchName
+
+              $prBodyPath = Join-Path $env:RUNNER_TEMP "pr-body-$vidClean-$pidClean.md"
+              $bodyScriptPath = Join-Path $env:RUNNER_TEMP "build-pr-body.cjs"
+              @'
+const fs = require("fs");
+const prop = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const prof = prop.profile;
+const links = (prop.sourceUrls || []).map((u) => "- " + u).join("\n");
+const issueLine = prop.issueNumber ? ("\n- **İlgili Issue:** #" + prop.issueNumber) : "";
+const body = [
+  "## AI Destekli Otonom Cihaz Profili Önerisi",
+  "",
+  "Bu Pull Request, açık kaynak topluluk verilerinden **GitHub Models (" + (prop.model || "gpt-4o") + ")** ile çıkarılmış ve `dotnet test` doğrulamasından geçmiş yeni bir cihaz profili içerir.",
+  "",
+  "- **Cihaz:** " + prof.name + " (`" + prop.vid + ":" + prop.pid + "`)",
+  "- **Kategori:** " + prof.category,
+  "- **Güven Düzeyi:** `" + prop.confidence + "`" + issueLine,
+  "- **Teknik Gerekçe:** " + (prop.reason || "-"),
+  "",
+  "### Doğrulanan Açık Kaynak Kanıtları",
+  links,
+  "",
+  "### Eklenecek Profil (`profiles-db.json`)",
+  "```json",
+  JSON.stringify(prof, null, 2),
+  "```",
+  "",
+  "> **Tek tıkla Merge** ettiğinizde değişiklik `main` dalına geçer ve kullanıcılar 24 saat içinde otomatik güncelleme alır."
+].join("\n");
+fs.writeFileSync(process.argv[3], body, "utf8");
+'@ | Set-Content -LiteralPath $bodyScriptPath -Encoding UTF8
+              node $bodyScriptPath $propFilePath $prBodyPath
+
+              $prUrl = gh pr create --repo $env:GITHUB_REPOSITORY --base main --head $branchName --title $prTitle --body-file $prBodyPath --label "ai-profile-proposal"
+              if ($LASTEXITCODE -eq 0 -and $prUrl) {
+                $createdPrs += [pscustomobject]@{
+                  name = $prop.profile.name
+                  vid = $prop.vid
+                  pid = $prop.pid
+                  confidence = $prop.confidence
+                  url = $prUrl.Trim()
+                }
+              }
+
+              git checkout -f main
+            }
+          } finally {
+            git checkout -f main 2>$null
+          }
+
+          if ($createdPrs.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($env:DISCORD_WEBHOOK_URL)) {
+            $bt = [char]96
+            $lines = $createdPrs | ForEach-Object { "• **$($_.name)** ($bt$($_.vid):$($_.pid)$bt, güven: $bt$($_.confidence)$bt) → [PR'ı İncele ve Onayla]($($_.url))" }
+            $discordPayload = @{
+              embeds = @(
+                @{
+                  title = "BatteryWidget — AI Yeni Cihaz Profili Buldu (Onay Bekliyor)"
+                  color = 9807270
+                  description = ($lines -join "`n") + "`n`nTüm testler geçti. Yukarıdaki bağlantıya tıklayıp **Merge Pull Request** ile yayınlayabilirsiniz."
+                }
+              )
+            } | ConvertTo-Json -Depth 5
+            Invoke-RestMethod -Uri $env:DISCORD_WEBHOOK_URL -Method Post -ContentType "application/json" -Body $discordPayload | Out-Null
+          }
+
       - name: Create or update GitHub Issues for unresolved devices
-        if: steps.resolve.outputs.unresolved_count != '0'
+        if: steps.resolve.outputs.unresolved_count != '' && steps.resolve.outputs.unresolved_count != '0' && github.event_name != 'schedule' && inputs.rescan_open_issues != true
         uses: actions/github-script@v7
         env:
           OUT_FILE: ${{ runner.temp }}/resolve-result.json
@@ -198,6 +387,10 @@ jobs:
 
               const vendorLine = item.usbVendorName ? `${item.usbVendorName}` : 'Bilinmiyor (usb.ids eşleşmedi)';
               const deviceLine = item.usbDeviceName ? `${item.usbDeviceName}` : 'Bilinmiyor (usb.ids eşleşmedi)';
+              const ossHits = Array.isArray(item.evidenceUrls) && item.evidenceUrls.length > 0
+                ? item.evidenceUrls.map((u) => `- ${u}`)
+                : ['- Doğrudan eşleşen açık kaynak kaydı bulunamadı'];
+              const aiLine = item.aiSummary ? `\n- **AI Değerlendirmesi:** ${item.aiSummary}` : '';
 
               const body = [
                 '## Anonim Cihaz Raporu',
@@ -207,7 +400,10 @@ jobs:
                 `- **HID Rapor Boyutları:** \`In:${item.maxIn} Out:${item.maxOut} Feat:${item.maxFeat}\``,
                 `- **USB IDs Üretici:** ${vendorLine}`,
                 `- **USB IDs Model:** ${deviceLine}`,
-                `- **Bildirim Sayısı:** 1`,
+                `- **Bildirim Sayısı:** 1${aiLine}`,
+                '',
+                '### Bulunan Açık Kaynak İpuçları',
+                ...ossHits,
                 '',
                 '### Hızlı Araştırma Bağlantıları (Açık Kaynak)',
                 `- [DeviceHunt (${item.vid}:${item.pid})](${item.researchLinks.usbIdsDeviceHunt})`,
@@ -215,7 +411,7 @@ jobs:
                 `- [HeadsetControl Kod Taraması](${item.researchLinks.headsetControlSearch})`,
                 `- [GitHub Genel Kod Taraması](${item.researchLinks.githubCodeSearch})`,
                 '',
-                '> Bilinen güvenli bir protokol ailesine ait olmadığı için donanım güvenliği amacıyla otomatik eklenmedi.'
+                '> Bilinen güvenli bir protokol ailesine ait olmadığı veya yeterli açık kaynak kanıtı bulunamadığı için otomatik eklenmedi.'
               ].join('\n');
 
               await github.rest.issues.create({
